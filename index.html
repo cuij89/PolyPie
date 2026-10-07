@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SPICE Plot Generator</title>
-<meta name="description" content="上传 Excel 生成 SPICE 多功能性饼图，可调整参数并导出 SVG / PNG / JPEG / PDF。数据只在浏览器本地处理。">
+<meta name="description" content="Upload an Excel or CSV file to create SPICE polyfunctionality pie charts, adjust the plot and export SVG / PDF / PNG / JPEG. Data is processed locally in your browser.">
 <link rel="stylesheet" href="style.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -13,155 +13,155 @@
 <body>
 <header class="topbar">
   <h1>SPICE Plot Generator</h1>
-  <span class="sub">Excel → SPICE 饼图 · 数据仅在本地浏览器处理，不会上传</span>
+  <span class="sub">Excel / CSV → SPICE pie charts · your data stays in your browser and is never uploaded</span>
 </header>
 
 <div class="layout">
   <aside class="panel">
 
     <section>
-      <h2>1. 数据</h2>
+      <h2>1. Data</h2>
       <label class="drop" id="drop">
         <input type="file" id="file" accept=".xlsx,.xls,.csv,.tsv,.txt">
-        <span><b>点击选择</b>或拖入 Excel / CSV 文件</span>
+        <span><b>Click to choose</b> or drop an Excel / CSV file</span>
       </label>
       <div class="row" id="sheetRow" hidden>
-        <label>工作表 <select id="sheet"></select></label>
+        <label>Sheet <select id="sheet"></select></label>
       </div>
       <div class="btns">
-        <button type="button" id="demoA">示例：组合表</button>
-        <button type="button" id="demoB">示例：FlowJo 导出</button>
+        <button type="button" id="demoA">Example: combination table</button>
+        <button type="button" id="demoB">Example: FlowJo export</button>
       </div>
       <div class="btns">
-        <button type="button" id="tplA" class="ghost">下载模板 A（组合表）</button>
-        <button type="button" id="tplB" class="ghost">下载模板 B（FlowJo）</button>
+        <button type="button" id="tplA" class="ghost">Template A (combinations)</button>
+        <button type="button" id="tplB" class="ghost">Template B (FlowJo)</button>
       </div>
-      <p class="status" id="status">尚未载入数据。</p>
+      <p class="status" id="status">No data loaded yet.</p>
       <details class="help">
-        <summary>支持的 Excel 格式</summary>
-        <p><b>A. 组合表：</b>每行一个布尔组合。若干标志物列填 <code>+/-</code>（或 1/0、Y/N），其余数值列每列是一个样本或组。</p>
-        <p><b>B. FlowJo 布尔门导出：</b>每行一个样本，列名形如 <code>CD4/IFNg+TNFa-IL2+ | Freq. of Parent</code>。可选文本列（如 Group）用于分组求均值。名为 Mean/SD 的行会被忽略。</p>
+        <summary>Supported file formats</summary>
+        <p><b>A. Combination table:</b> one Boolean combination per row. Marker columns contain <code>+/-</code> (or 1/0, Y/N); every numeric column is one sample or group.</p>
+        <p><b>B. Gate-name columns (FlowJo export):</b> one sample per row, with column names such as <code>CD4/IFNg+TNFa-IL2+ | Freq. of Parent</code> or <code>PD1+/LAG3-/TIGIT+</code>. An optional text column (e.g. Group) can be used to average by group. Rows named Mean / SD are ignored.</p>
       </details>
     </section>
 
     <section id="secPies" hidden>
-      <h2>2. 饼图</h2>
+      <h2>2. Pies</h2>
       <div class="row" id="pieModeRow">
-        <label>每个饼图代表
+        <label>One pie per
           <select id="pieMode">
-            <option value="sample">每个样本</option>
-            <option value="group">每组均值</option>
+            <option value="sample">Sample</option>
+            <option value="group">Group (mean)</option>
           </select>
         </label>
-        <label id="groupColLabel">分组列 <select id="groupCol"></select></label>
+        <label id="groupColLabel">Group column <select id="groupCol"></select></label>
       </div>
       <div class="checklist" id="pieList"></div>
       <div class="btns small">
-        <button type="button" id="pieAll" class="ghost">全选</button>
-        <button type="button" id="pieNone" class="ghost">全不选</button>
+        <button type="button" id="pieAll" class="ghost">Select all</button>
+        <button type="button" id="pieNone" class="ghost">Select none</button>
       </div>
     </section>
 
     <section id="secMarkers" hidden>
-      <h2>3. 标志物 / 外圈弧线</h2>
-      <p class="hint">取消勾选的标志物会被合并（相应组合求和）。可修改显示名，如 IFNg → IFN-γ。</p>
-      <table class="markers"><thead><tr><th>用</th><th>显示名</th><th>弧色</th></tr></thead><tbody id="markerRows"></tbody></table>
+      <h2>3. Markers / outer arcs</h2>
+      <p class="hint">Unchecked markers are collapsed (their combinations are summed). Display names can be edited, e.g. IFNg → IFN-γ.</p>
+      <table class="markers"><thead><tr><th>Use</th><th>Display name</th><th>Arc</th></tr></thead><tbody id="markerRows"></tbody></table>
       <div class="row">
-        <label class="chk"><input type="checkbox" data-key="excludeNeg" checked> 排除全阴性组合</label>
-        <label class="chk"><input type="checkbox" data-key="clipNeg" checked> 负值按 0 处理</label>
+        <label class="chk"><input type="checkbox" data-key="excludeNeg" checked> Exclude all-negative</label>
+        <label class="chk"><input type="checkbox" data-key="clipNeg" checked> Treat negative values as 0</label>
       </div>
     </section>
 
     <section id="secStyle" hidden>
-      <h2>4. 外观</h2>
+      <h2>4. Appearance</h2>
       <div class="grid2">
-        <label>切片配色
+        <label>Slice colors
           <select data-key="colorMode">
-            <option value="countShade">按功能数（同组深浅）</option>
-            <option value="count">按功能数（同组同色）</option>
-            <option value="combo">每个组合独立颜色</option>
+            <option value="countShade">By # functions (shaded)</option>
+            <option value="count">By # functions (flat)</option>
+            <option value="combo">One color per combination</option>
           </select>
         </label>
-        <label>组合排序
+        <label>Slice order
           <select data-key="sortOrder">
-            <option value="desc">功能数 多→少</option>
-            <option value="asc">功能数 少→多</option>
+            <option value="desc"># functions: high → low</option>
+            <option value="asc"># functions: low → high</option>
           </select>
         </label>
       </div>
       <div id="countColors" class="countColors"></div>
       <div class="grid2">
-        <label>饼图半径 <input type="number" data-key="radius" value="110" min="30" max="400" step="5"></label>
-        <label>内径比例 (0=实心) <input type="number" data-key="innerRatio" value="0" min="0" max="0.9" step="0.05"></label>
-        <label>弧线粗细 <input type="number" data-key="arcWidth" value="7" min="1" max="40" step="1"></label>
-        <label>弧线间距 <input type="number" data-key="arcGap" value="3" min="0" max="30" step="1"></label>
-        <label>弧线离饼距离 <input type="number" data-key="arcOffset" value="5" min="0" max="40" step="1"></label>
-        <label>起始角度 (°) <input type="number" data-key="startAngle" value="0" min="-360" max="360" step="15"></label>
-        <label>每行饼图数 <input type="number" data-key="cols" value="3" min="1" max="12" step="1"></label>
-        <label>饼图间距 <input type="number" data-key="spacing" value="30" min="0" max="200" step="5"></label>
-        <label>切片边框宽 <input type="number" data-key="strokeWidth" value="0.75" min="0" max="5" step="0.25"></label>
-        <label>切片边框色 <input type="color" data-key="strokeColor" value="#ffffff"></label>
+        <label>Pie radius <input type="number" data-key="radius" value="110" min="30" max="400" step="5"></label>
+        <label>Hole ratio (0 = solid) <input type="number" data-key="innerRatio" value="0" min="0" max="0.9" step="0.05"></label>
+        <label>Arc width <input type="number" data-key="arcWidth" value="7" min="1" max="40" step="1"></label>
+        <label>Arc gap <input type="number" data-key="arcGap" value="3" min="0" max="30" step="1"></label>
+        <label>Arc distance from pie <input type="number" data-key="arcOffset" value="5" min="0" max="40" step="1"></label>
+        <label>Start angle (°) <input type="number" data-key="startAngle" value="0" min="-360" max="360" step="15"></label>
+        <label>Pies per row <input type="number" data-key="cols" value="3" min="1" max="12" step="1"></label>
+        <label>Pie spacing <input type="number" data-key="spacing" value="30" min="0" max="200" step="5"></label>
+        <label>Slice border width <input type="number" data-key="strokeWidth" value="0.75" min="0" max="5" step="0.25"></label>
+        <label>Slice border color <input type="color" data-key="strokeColor" value="#ffffff"></label>
       </div>
       <div class="row">
-        <label class="chk"><input type="checkbox" data-key="clockwise" checked> 顺时针</label>
-        <label class="chk"><input type="checkbox" data-key="showPieTitle" checked> 显示饼图名称</label>
+        <label class="chk"><input type="checkbox" data-key="clockwise" checked> Clockwise</label>
+        <label class="chk"><input type="checkbox" data-key="showPieTitle" checked> Show pie names</label>
       </div>
       <div class="grid2">
-        <label>百分比标签
+        <label>Percent labels
           <select data-key="labelMode">
-            <option value="none">不显示</option>
-            <option value="percent">显示 %</option>
+            <option value="none">Off</option>
+            <option value="percent">Show %</option>
           </select>
         </label>
-        <label>标签最小占比 (%) <input type="number" data-key="labelMin" value="5" min="0" max="100" step="1"></label>
+        <label>Min slice to label (%) <input type="number" data-key="labelMin" value="5" min="0" max="100" step="1"></label>
       </div>
 
-      <h3>文字与图例</h3>
-      <label class="full">总标题 <input type="text" data-key="title" value="" placeholder="可留空"></label>
+      <h3>Text &amp; legend</h3>
+      <label class="full">Title <input type="text" data-key="title" value="" placeholder="Optional"></label>
       <div class="grid2">
-        <label>字体
+        <label>Font
           <select data-key="fontFamily">
             <option value="Arial, Helvetica, sans-serif">Arial</option>
             <option value="Helvetica, Arial, sans-serif">Helvetica</option>
             <option value="'Times New Roman', Times, serif">Times New Roman</option>
           </select>
         </label>
-        <label>字号 <input type="number" data-key="fontSize" value="14" min="6" max="40" step="1"></label>
-        <label>图例位置
+        <label>Font size <input type="number" data-key="fontSize" value="14" min="6" max="40" step="1"></label>
+        <label>Legend position
           <select data-key="legendPos">
-            <option value="right">右侧</option>
-            <option value="bottom">下方</option>
-            <option value="none">不显示</option>
+            <option value="right">Right</option>
+            <option value="bottom">Bottom</option>
+            <option value="none">None</option>
           </select>
         </label>
-        <label>切片图例
+        <label>Slice legend
           <select data-key="legendDetail">
-            <option value="auto">自动</option>
-            <option value="count">按功能数</option>
-            <option value="combo">列出每个组合</option>
+            <option value="auto">Auto</option>
+            <option value="count">By # functions</option>
+            <option value="combo">Every combination</option>
           </select>
         </label>
-        <label>背景
+        <label>Background
           <select data-key="background">
-            <option value="white">白色</option>
-            <option value="transparent">透明</option>
+            <option value="white">White</option>
+            <option value="transparent">Transparent</option>
           </select>
         </label>
       </div>
     </section>
 
     <section id="secExport" hidden>
-      <h2>5. 导出</h2>
+      <h2>5. Export</h2>
       <div class="grid2">
-        <label>格式
+        <label>Format
           <select id="fmt">
-            <option value="svg">SVG（矢量）</option>
-            <option value="pdf">PDF（矢量）</option>
+            <option value="svg">SVG (vector)</option>
+            <option value="pdf">PDF (vector)</option>
             <option value="png">PNG</option>
             <option value="jpeg">JPEG</option>
           </select>
         </label>
-        <label id="dpiLabel">分辨率 (DPI)
+        <label id="dpiLabel">Resolution (DPI)
           <select id="dpi">
             <option value="150">150</option>
             <option value="300" selected>300</option>
@@ -169,19 +169,19 @@
           </select>
         </label>
       </div>
-      <label class="full">文件名 <input type="text" id="fname" value="spice_plot"></label>
+      <label class="full">File name <input type="text" id="fname" value="spice_plot"></label>
       <div class="btns">
-        <button type="button" id="download" class="primary">下载图片</button>
-        <button type="button" id="downloadCsv" class="ghost">下载处理后数据 (CSV)</button>
+        <button type="button" id="download" class="primary">Download image</button>
+        <button type="button" id="downloadCsv" class="ghost">Download processed data (CSV)</button>
       </div>
-      <p class="hint" id="pdfHint" hidden>PDF 使用标准字体，希腊字母或中文可能无法正确显示；遇到这种情况请用 SVG 或 PNG。</p>
+      <p class="hint" id="pdfHint" hidden>PDF uses standard fonts, so Greek letters or other non-Latin characters may not display correctly. Use SVG or PNG in that case.</p>
     </section>
   </aside>
 
   <main class="preview">
-    <div class="canvasWrap" id="plot"><p class="empty">载入数据或点击左侧示例后，在这里预览 SPICE 图。</p></div>
+    <div class="canvasWrap" id="plot"><p class="empty">Load a file or click an example on the left to preview the SPICE plot here.</p></div>
     <details class="tableWrap" id="tableWrap" hidden>
-      <summary>处理后数据（%）</summary>
+      <summary>Processed data (%)</summary>
       <div id="table"></div>
     </details>
   </main>

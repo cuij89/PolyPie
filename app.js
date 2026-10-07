@@ -109,7 +109,7 @@
     });
 
     const gateSet = new Set(cols.map((c) => c.i));
-    const colName = (i) => header[i] || `列${i + 1}`;
+    const colName = (i) => header[i] || `Column ${i + 1}`;
     const textCols = header.map((_, i) => i).filter((i) => !gateSet.has(i) &&
       body.some((r) => r[i] != null && r[i] !== '' && !isFinite(toNum(r[i]))));
     const nameCol = textCols.length ? textCols[0] : (gateSet.has(0) ? -1 : 0);
@@ -117,7 +117,7 @@
     const samples = [];
     body.forEach((r, ri) => {
       const raw = nameCol >= 0 ? r[nameCol] : null;
-      const name = raw != null && raw !== '' ? String(raw).trim() : `行 ${ri + 2}`;
+      const name = raw != null && raw !== '' ? String(raw).trim() : `Row ${ri + 2}`;
       if (/^(mean|sd|std|stdev|median|average|avg|cv|sem)$/i.test(name)) return;
       const vals = colIdx.map((i) => toNum(r[i]));
       if (vals.every((v) => !isFinite(v))) return;
@@ -130,7 +130,7 @@
     return {
       markers, combos, samples: uniqueNames(samples),
       groupCols: textCols.filter((i) => i !== nameCol).map(colName),
-      info: `识别为 FlowJo / 布尔门列名格式：${markers.length} 个标志物（${markers.join(', ')}），${combos.length} 个组合，${samples.length} 个样本。`,
+      info: `Detected gate-name columns (FlowJo style): ${markers.length} markers (${markers.join(", ")}), ${combos.length} combinations, ${samples.length} samples.`,
     };
   }
 
@@ -156,23 +156,23 @@
     if (combos.length < 2) return null;
 
     const samples = valueCols.map((i) => ({
-      name: header[i] || `列${i + 1}`,
+      name: header[i] || `Column ${i + 1}`,
       values: rowsByCombo.map((rows) => rows.reduce((a, r) => a + (isFinite(toNum(r[i])) ? toNum(r[i]) : 0), 0)),
       meta: {},
     }));
     const markers = markerCols.map((i) => header[i]);
     return {
       markers, combos, samples: uniqueNames(samples), groupCols: [],
-      info: `识别为组合表格式：${markers.length} 个标志物（${markers.join(', ')}），${combos.length} 个组合，${samples.length} 个样本列。`,
+      info: `Detected combination table: ${markers.length} markers (${markers.join(", ")}), ${combos.length} combinations, ${samples.length} sample columns.`,
     };
   }
 
   function buildDataset(rows) {
     const header = (rows[0] || []).map((h) => (h == null ? '' : String(h).trim()));
     const body = rows.slice(1).filter((r) => r && r.some((v) => v != null && v !== ''));
-    if (!header.length || !body.length) throw new Error('表格为空或缺少表头行（第一行应为列名）。');
+    if (!header.length || !body.length) throw new Error('The sheet is empty or has no header row (the first row must contain column names).');
     const ds = buildFlowJo(header, body) || buildComboTable(header, body);
-    if (!ds) throw new Error('无法识别数据格式。请参考左侧“支持的 Excel 格式”或下载模板。');
+    if (!ds) throw new Error('Could not recognize the data layout. See "Supported file formats" on the left or download a template.');
     return ds;
   }
 
@@ -190,7 +190,7 @@
       st.fileBase = file.name.replace(/\.[^.]+$/, '');
       useWorkbook(wb);
     } catch (e) {
-      setStatus('无法读取文件：' + e.message, true);
+      setStatus('Could not read the file: ' + e.message, true);
     }
   }
 
@@ -221,7 +221,7 @@
 
   function showSections(on) {
     ['secPies', 'secMarkers', 'secStyle', 'secExport', 'tableWrap'].forEach((id) => { $(id).hidden = !on; });
-    if (!on) $('plot').innerHTML = '<p class="empty">载入数据或点击左侧示例后，在这里预览 SPICE 图。</p>';
+    if (!on) $('plot').innerHTML = '<p class="empty">Load a file or click an example on the left to preview the SPICE plot here.</p>';
   }
 
   function initFromDataset() {
@@ -274,7 +274,7 @@
     box.innerHTML = '';
     for (let k = nInc; k >= 1; k--) {
       const lab = document.createElement('label');
-      lab.innerHTML = `<input type="color" value="${countColor(k, nInc)}"> ${k} 功能`;
+      lab.innerHTML = `<input type="color" value="${countColor(k, nInc)}"> ${countLabel(k)}`;
       const inp = lab.querySelector('input');
       inp.addEventListener('input', () => { st.countOverride[k] = inp.value; render(); });
       box.appendChild(lab);
@@ -334,7 +334,7 @@
     if (st.pieMode === 'group' && st.groupCol) {
       const groups = new Map();
       ds.samples.forEach((s) => {
-        const g = s.meta[st.groupCol] || '(空)';
+        const g = s.meta[st.groupCol] || '(blank)';
         if (!groups.has(g)) groups.set(g, []);
         groups.get(g).push(agg(s.values));
       });
@@ -553,8 +553,8 @@
 
   // ---------- table ----------
   function buildTable(d) {
-    if (!d.pies.length) return '<p class="hint">没有选中的饼图。</p>';
-    let h = '<table class="data"><thead><tr><th>组合</th><th>功能数</th>';
+    if (!d.pies.length) return '<p class="hint">No pies selected.</p>';
+    let h = '<table class="data"><thead><tr><th>Combination</th><th>Functions</th>';
     d.pies.forEach((p) => { h += `<th>${esc(p.name)}</th>`; });
     h += '</tr></thead><tbody>';
     d.combos.forEach((s, j) => {
@@ -574,7 +574,7 @@
     buildPieList(d.allNames);
     buildCountColors(d.nInc);
     if (!d.pies.length) {
-      $('plot').innerHTML = '<p class="empty">请在“饼图”中至少选择一个。</p>';
+      $('plot').innerHTML = '<p class="empty">Select at least one pie under "Pies".</p>';
       st.lastSvg = '';
     } else {
       const { svg, w, h } = buildSvg(d);
@@ -608,7 +608,7 @@
         URL.revokeObjectURL(url);
         resolve(c);
       };
-      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('图片渲染失败')); };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Failed to render the image')); };
       img.src = url;
     });
   }
@@ -678,7 +678,7 @@
         } finally { holder.remove(); }
       }
     } catch (e) {
-      alert('导出失败：' + e.message);
+      alert('Export failed: ' + e.message);
     } finally {
       btn.disabled = false;
     }
