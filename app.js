@@ -546,18 +546,19 @@
       // slices
       let cum = 0;
       const pos = p.frac.map((fr) => { const s = cum; cum += fr; return [s, cum]; });
-      // adjacent slices of the same color are drawn as one, so borders only separate color groups
+      // with dividers off, adjacent slices of the same color are drawn as one; otherwise one slice per combination
+      const merge = o.dividers === 'none';
       const segs = [];
       p.frac.forEach((fr, j) => {
         if (fr <= 0) return;
         const k = d.combos[j].filter(Boolean).length;
         const last = segs[segs.length - 1];
-        if (last && last.color === d.colors[j]) { last.t1 = pos[j][1]; last.fr += fr; }
+        if (merge && last && last.color === d.colors[j]) { last.t1 = pos[j][1]; last.fr += fr; }
         else segs.push({ t0: pos[j][0], t1: pos[j][1], fr, color: d.colors[j], k, j });
       });
       segs.forEach((s) => {
         const [a0, a1] = span(s.t0, s.t1);
-        const label = opts.colorMode === 'combo' || opts.colorMode === 'countShade' ? comboLabel(d.combos[s.j], d.markers) : `${s.k} positive`;
+        const label = merge && (o.colorMode === 'gray' || o.colorMode === 'count') ? `${s.k} positive` : comboLabel(d.combos[s.j], d.markers);
         els.push({ t: 'sector', cx, cy, r0: inner, r1: R, a0, a1, fill: s.color, stroke, name: `${p.name} slice ${label} (${(s.fr * 100).toFixed(1)}%)` });
       });
       // arcs: one ring per marker, covering slices where that marker is positive
@@ -576,6 +577,20 @@
           els.push({ t: 'sector', cx, cy, r0, r1, a0, a1, fill: m.color, name: `${p.name} arc ${m.label}` });
         });
       });
+      // divider lines between combinations, cut through the arcs up to the outermost ring touching the boundary
+      if (o.dividers === 'arcs' && segs.length > 1) {
+        const color = o.strokeWidth > 0 ? o.strokeColor : '#ffffff';
+        const width = Math.max(o.strokeWidth, 0.75);
+        segs.forEach((s, i) => {
+          const prev = segs[(i - 1 + segs.length) % segs.length];
+          let ring = -1;
+          d.markers.forEach((_, mi) => { if (d.combos[s.j][mi] || d.combos[prev.j][mi]) ring = mi; });
+          const rOut = ring < 0 ? R : R + o.arcOffset + ring * (o.arcWidth + o.arcGap) + o.arcWidth + 0.5;
+          const a = ang(s.t0);
+          const [x1, y1] = pt(cx, cy, inner, a), [x2, y2] = pt(cx, cy, rOut, a);
+          els.push({ t: 'line', x1, y1, x2, y2, color, width, name: `${p.name} divider` });
+        });
+      }
       // percent labels
       if (o.labelMode === 'percent') {
         const lr = inner > 0 ? (inner + R) / 2 : R * 0.66;
@@ -607,6 +622,8 @@
       else if (e.t === 'sector') {
         const s = e.stroke ? ` stroke="${e.stroke.color}" stroke-width="${e.stroke.width}" stroke-linejoin="round"` : '';
         out.push(`<path d="${sectorPath(e.cx, e.cy, e.r0, e.r1, e.a0, e.a1)}" fill="${e.fill}" fill-rule="evenodd"${s}/>`);
+      } else if (e.t === 'line') {
+        out.push(`<line x1="${f(e.x1)}" y1="${f(e.y1)}" x2="${f(e.x2)}" y2="${f(e.y2)}" stroke="${e.color}" stroke-width="${e.width}" stroke-linecap="butt"/>`);
       } else if (e.t === 'text') {
         out.push(`<text x="${f(e.x)}" y="${f(e.y + e.size * 0.35)}"${e.anchor === 'middle' ? ' text-anchor="middle"' : ''} font-size="${f(e.size)}"${e.bold ? ' font-weight="bold"' : ''} fill="${e.color}">${esc(e.s)}</text>`);
       }
@@ -847,6 +864,14 @@
           const range = full ? [0, 359.99] : [pptAng(e.a0), pptAng(e.a1)];
           if (e.r0 <= 0) slide.addShape(full ? 'ellipse' : 'pie', { ...box, ...style, ...(full ? {} : { angleRange: range }) });
           else slide.addShape('blockArc', { ...box, ...style, angleRange: range, arcThicknessRatio: (e.r1 - e.r0) / e.r1 });
+        } else if (e.t === 'line') {
+          // PowerPoint lines run top-left -> bottom-right inside their box; flipV for the other diagonal
+          slide.addShape('line', {
+            x: ox + L(Math.min(e.x1, e.x2)), y: oy + L(Math.min(e.y1, e.y2)),
+            w: L(Math.abs(e.x2 - e.x1)), h: L(Math.abs(e.y2 - e.y1)),
+            flipV: (e.x2 - e.x1) * (e.y2 - e.y1) < 0,
+            line: { color: hex(e.color), width: pt(e.width) }, objectName: e.name,
+          });
         } else if (e.t === 'text') {
           const tw = L(textW(e.s, e.size) * 1.15 + e.size * 0.6), th = L(e.size * 1.5);
           slide.addText(e.s, {
