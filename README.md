@@ -14,7 +14,7 @@ A browser-based tool that turns an Excel / CSV file into SPICE-style polyfunctio
 | +    | +    | -   | 0.35    | 0.10 |
 
 **B. Gate-name columns (FlowJo export / Shiny-app CSV)** — one row per sample; column names encode the combination, e.g.
-`CD4/IFNg+TNFa-IL2+ | Freq. of Parent` or `PD1+/LAG3-/TIGIT+`. The first text column is used as the sample name; other text columns (e.g. `Group`) can be used to average pies per group. Rows named Mean / SD are ignored, and parent gates that are always positive (e.g. `CD4+`) are dropped.
+`CD4/IFNg+TNFa-IL2+ | Freq. of Parent` or `PD1+/LAG3-/TIGIT+`. A gate whose own name ends in `+` also works: a trailing `+-` is read as negative, so `GZMB+IFNg+TNFa-` and `GZMB+-IFNg+TNFa-` are GZMB+ and GZMB- of the same marker. When a file contains such `+-` gates, a note at the top of the page states the convention that was applied. The sample-name column is detected automatically (a `Sample`/`Name`/`ID`-style header, else the text column with the most distinct values); the remaining text columns (e.g. `Group`) can be used to average pies per group. Rows named Mean / SD are ignored, and parent gates that are always positive (e.g. `CD4+`) are dropped.
 
 ## Options
 

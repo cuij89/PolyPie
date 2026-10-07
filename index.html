@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SPICE Plot Generator</title>
 <meta name="description" content="Upload an Excel or CSV file to create SPICE polyfunctionality pie charts, adjust the plot and export SVG / PDF / PNG / JPEG. Data is processed locally in your browser.">
-<link rel="stylesheet" href="style.css?v=8">
+<link rel="stylesheet" href="style.css?v=9">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/svg2pdf.js@2.2.3/dist/svg2pdf.umd.min.js"></script>
@@ -16,6 +16,12 @@
   <h1>SPICE Plot Generator</h1>
   <span class="sub">Excel / CSV → SPICE pie charts · your data stays in your browser and is never uploaded</span>
 </header>
+
+<div class="notice" id="notice" hidden>
+  <span class="ico" aria-hidden="true">!</span>
+  <p id="noticeText"></p>
+  <button type="button" id="noticeOk">Got it</button>
+</div>
 
 <div class="layout">
   <aside class="panel">
@@ -206,6 +212,6 @@
   </main>
 </div>
 
-<script src="app.js?v=8"></script>
+<script src="app.js?v=9"></script>
 </body>
 </html>

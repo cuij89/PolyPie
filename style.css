@@ -8,6 +8,9 @@
   --accent-text: #ffffff;
   --err: #c62828;
   --input: #ffffff;
+  --warn-bg: #fff6e0;
+  --warn-line: #e8c879;
+  --warn-text: #6b4a00;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -19,11 +22,15 @@
     --accent: #4d8ff5;
     --input: #262c32;
     --err: #ef6b6b;
+    --warn-bg: #392f15;
+    --warn-line: #6b5520;
+    --warn-text: #f2d89c;
   }
 }
 :root[data-theme="dark"] {
   --bg: #15191d; --panel: #1e2328; --text: #e6e9ec; --muted: #9aa5b0;
   --line: #333b43; --accent: #4d8ff5; --input: #262c32; --err: #ef6b6b;
+  --warn-bg: #392f15; --warn-line: #6b5520; --warn-text: #f2d89c;
 }
 
 * { box-sizing: border-box; }
@@ -41,8 +48,25 @@ body {
 .topbar h1 { margin: 0; font-size: 20px; }
 .topbar .sub { color: var(--muted); font-size: 13px; }
 
-.layout { display: grid; grid-template-columns: 340px 1fr; min-height: calc(100vh - 56px); }
-.panel { background: var(--panel); border-right: 1px solid var(--line); padding: 8px 16px 32px; overflow-y: auto; max-height: calc(100vh - 56px); position: sticky; top: 0; }
+.notice {
+  display: flex; align-items: flex-start; gap: 10px; padding: 9px 20px; font-size: 13px;
+  background: var(--warn-bg); color: var(--warn-text); border-bottom: 1px solid var(--warn-line);
+}
+.notice p { margin: 0; flex: 1; min-width: 0; }
+.notice code { background: rgba(127, 127, 127, .22); color: inherit; }
+.notice .ico {
+  flex: none; width: 18px; height: 18px; border-radius: 50%; margin-top: 1px;
+  background: var(--warn-line); color: var(--warn-text);
+  font-size: 12px; font-weight: 700; line-height: 18px; text-align: center;
+}
+.notice button {
+  flex: none; padding: 3px 10px; font-size: 12px;
+  background: transparent; color: inherit; border-color: var(--warn-line);
+}
+.notice button:hover { border-color: var(--warn-text); }
+
+.layout { display: grid; grid-template-columns: 340px 1fr; min-height: calc(100vh - var(--chrome, 56px)); }
+.panel { background: var(--panel); border-right: 1px solid var(--line); padding: 8px 16px 32px; overflow-y: auto; max-height: calc(100vh - var(--chrome, 56px)); position: sticky; top: 0; }
 .panel section { padding: 12px 0; border-bottom: 1px solid var(--line); }
 .panel h2 { font-size: 15px; margin: 0 0 10px; }
 .panel h3 { font-size: 13px; margin: 14px 0 8px; color: var(--muted); }

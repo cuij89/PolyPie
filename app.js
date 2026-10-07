@@ -45,15 +45,22 @@
 
   // "IFNg+TNFa-IL2+", "IFNg+ , TNFa-", "IL-2+", "PD1negLAG3+", "Nrp1+2B4neg" -> [{name, key, pos}]
   // A "-" followed by a digit is part of the name (IL-2); "neg"/"pos" are accepted as signs.
+  // A gate whose own name ends in "+" yields a run of signs, e.g. "GZMB+-" = NOT "GZMB+": the
+  // last +/- is the sign and the rest belongs to the name, so GZMB+ and GZMB+- are one marker.
   function parseSegment(seg) {
     const s = seg.replace(/[−–]/g, '-').replace(/^\s*Q\d+\s*:\s*/i, '').trim();
     if (!s) return null;
-    const re = /([^\s,;]+?)\s*(\+|-(?!\d)|neg|pos)/gi;
+    const re = /([^\s,;]+?)\s*((?:\+|-(?!\d))+|neg|pos)/gi;
     const toks = [];
     let m, last = 0;
     while ((m = re.exec(s))) {
       if (s.slice(last, m.index).replace(/[\s,;]/g, '') !== '') return null;
-      toks.push({ name: m[1], key: m[1].toLowerCase(), pos: m[2] === '+' || m[2].toLowerCase() === 'pos' });
+      const sg = m[2].toLowerCase();
+      const word = sg === 'neg' || sg === 'pos';
+      toks.push({
+        name: m[1], key: m[1].toLowerCase(), pos: word ? sg === 'pos' : sg.endsWith('+'),
+        raw: m[1] + m[2], amb: !word && m[2].length > 1,
+      });
       last = re.lastIndex;
     }
     if (!toks.length || s.slice(last).replace(/[\s,;]/g, '') !== '') return null;
@@ -96,11 +103,21 @@
 
     const cols = [];
     parsed.forEach((p, i) => { if (p && keyOf(p) === best) cols.push({ i, toks: p }); });
-    const signOf = (c, key) => c.toks.find((t) => t.key === key).pos;
+    const tokOf = (c, key) => c.toks.find((t) => t.key === key);
+    const signOf = (c, key) => tokOf(c, key).pos;
     // markers that are + in every column are parent gates (e.g. CD4+), not functions
     const kept = cols[0].toks.filter((t) => new Set(cols.map((c) => signOf(c, t.key))).size > 1);
     const markers = kept.map((t) => t.name);
     if (markers.length < 2) return null;
+
+    // A run such as "GZMB+-" can only be read by assuming the first sign belongs to the gate name,
+    // so every spelling of such a marker is reported for the user to confirm.
+    const ambiguous = kept.map((t) => {
+      const forms = new Map();
+      let example = '';
+      cols.forEach((c) => { const x = tokOf(c, t.key); forms.set(x.raw, x.pos); if (x.amb) example = x.raw; });
+      return { name: t.name, example, forms: [...forms] };
+    }).filter((a) => a.example);
 
     const combos = [], colIdx = [], seen = new Set();
     cols.forEach((c) => {
@@ -114,7 +131,18 @@
     const colName = (i) => header[i] || `Column ${i + 1}`;
     const textCols = header.map((_, i) => i).filter((i) => !gateSet.has(i) &&
       body.some((r) => r[i] != null && r[i] !== '' && !isFinite(toNum(r[i]))));
-    const nameCol = textCols.length ? textCols[0] : (gateSet.has(0) ? -1 : 0);
+    // The sample-name column identifies the row; any other text column (Group, Day, ...) is kept
+    // for averaging. Prefer a sample-like header whose values are mostly unique, otherwise the
+    // column with the most distinct values, so a leading "Group" column is not taken as the name.
+    const nDistinct = header.map((_, i) => (textCols.includes(i)
+      ? new Set(body.map((r) => (r[i] == null ? '' : String(r[i]).trim()))).size : 0));
+    const SAMPLE_RE = /^(sample|name|id|file|specimen|subject|donor|patient|animal|mouse|well|tube)/i;
+    let nameCol = gateSet.has(0) ? -1 : 0;
+    if (textCols.length) {
+      const named = textCols.filter((i) => SAMPLE_RE.test(header[i] || '') && nDistinct[i] * 2 >= body.length);
+      nameCol = named.length ? named[0]
+        : textCols.reduce((a, i) => (nDistinct[i] > nDistinct[a] ? i : a), textCols[0]);
+    }
 
     const samples = [];
     body.forEach((r, ri) => {
@@ -130,7 +158,7 @@
     if (!samples.length) return null;
 
     return {
-      markers, combos, samples: uniqueNames(samples),
+      markers, combos, samples: uniqueNames(samples), ambiguous,
       groupCols: textCols.filter((i) => i !== nameCol).map(colName),
       info: `Detected gate-name columns (FlowJo style): ${markers.length} markers (${markers.join(", ")}), ${combos.length} combinations, ${samples.length} samples.`,
     };
@@ -164,7 +192,7 @@
     }));
     const markers = markerCols.map((i) => header[i]);
     return {
-      markers, combos, samples: uniqueNames(samples), groupCols: [],
+      markers, combos, samples: uniqueNames(samples), groupCols: [], ambiguous: [],
       info: `Detected combination table: ${markers.length} markers (${markers.join(", ")}), ${combos.length} combinations, ${samples.length} sample columns.`,
     };
   }
@@ -183,6 +211,30 @@
     const el = $('status');
     el.textContent = msg;
     el.classList.toggle('err', !!err);
+  }
+
+  // Some gates are marked "+-" (e.g. "GZMB+-"), which is read as negative. The convention is
+  // stated at the top of the page so it is on the record rather than applied silently.
+  function showNotice(amb) {
+    const box = $('notice');
+    const show = !!(amb && amb.length);
+    box.hidden = !show;
+    if (show) {
+      const forms = (a) => a.forms
+        .map(([raw, pos]) => `<code>${esc(raw)}</code> = ${esc(a.name)} ${pos ? 'positive' : 'negative'}`)
+        .join(', ');
+      $('noticeText').innerHTML = '<b>Note</b> &mdash; some gates in this file are marked ' +
+        `<code>+-</code> (e.g. <code>${esc(amb[0].example)}</code>). In this analysis <code>+-</code> ` +
+        `is treated as negative, so: ${amb.map(forms).join('; ')}.`;
+    }
+    sizeChrome();
+  }
+
+  // the panel is sticky under the header, so its height has to allow for a visible banner
+  function sizeChrome() {
+    const box = $('notice');
+    const h = 56 + (box.hidden ? 0 : box.offsetHeight);
+    document.documentElement.style.setProperty('--chrome', `${h}px`);
   }
 
   async function loadFile(file) {
@@ -213,11 +265,13 @@
       st.ds = null;
       setStatus(e.message, true);
       showSections(false);
+      showNotice(null);
       return;
     }
     initFromDataset();
     setStatus(st.ds.info);
     showSections(true);
+    showNotice(st.ds.ambiguous);
     render();
   }
 
@@ -993,6 +1047,8 @@
   }
 
   // ---------- wiring ----------
+  $('noticeOk').addEventListener('click', () => showNotice(null));
+  window.addEventListener('resize', sizeChrome);
   $('file').addEventListener('change', (e) => loadFile(e.target.files[0]));
   const drop = $('drop');
   ['dragenter', 'dragover'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('over'); }));
