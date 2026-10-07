@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SPICE Plot Generator</title>
 <meta name="description" content="Upload an Excel or CSV file to create SPICE polyfunctionality pie charts, adjust the plot and export SVG / PDF / PNG / JPEG. Data is processed locally in your browser.">
-<link rel="stylesheet" href="style.css?v=3">
+<link rel="stylesheet" href="style.css?v=5">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/svg2pdf.js@2.2.3/dist/svg2pdf.umd.min.js"></script>
@@ -47,6 +47,14 @@
 
     <section id="secPies" hidden>
       <h2>2. Pies</h2>
+      <div class="row">
+        <label>Layout
+          <select id="split">
+            <option value="each" selected>Separate plot for each sample</option>
+            <option value="one">All pies in one figure</option>
+          </select>
+        </label>
+      </div>
       <div class="row" id="pieModeRow">
         <label>One pie per
           <select id="pieMode">
@@ -165,7 +173,9 @@
             <option value="svg">SVG (vector)</option>
             <option value="pdf">PDF (vector)</option>
             <option value="png">PNG</option>
+            <option value="tiff">TIFF</option>
             <option value="jpeg">JPEG</option>
+            <option value="pptx">PowerPoint (PPTX)</option>
           </select>
         </label>
         <label id="dpiLabel">Resolution (DPI)
@@ -173,12 +183,6 @@
             <option value="150">150</option>
             <option value="300" selected>300</option>
             <option value="600">600</option>
-          </select>
-        </label>
-        <label>Files
-          <select id="split">
-            <option value="one">All pies in one figure</option>
-            <option value="each">One file per pie (ZIP)</option>
           </select>
         </label>
       </div>
@@ -200,6 +204,6 @@
   </main>
 </div>
 
-<script src="app.js?v=3"></script>
+<script src="app.js?v=5"></script>
 </body>
 </html>

@@ -617,15 +617,42 @@
     st.lastData = d;
     buildPieList(d.allNames);
     buildCountColors(d.nInc);
+    const plot = $('plot');
     if (!d.pies.length) {
-      $('plot').innerHTML = '<p class="empty">Select at least one pie under "Pies".</p>';
+      plot.innerHTML = '<p class="empty">Select at least one pie under "Pies".</p>';
       st.lastSvg = '';
+    } else if ($('split').value === 'each') {
+      // one complete plot (with legend) per sample, each downloadable on its own
+      plot.innerHTML = '';
+      const cards = document.createElement('div');
+      cards.className = 'cards';
+      d.pies.forEach((p) => {
+        const fig = buildSvg({ ...d, pies: [p] });
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.innerHTML = fig.svg + '<button type="button" class="ghost">Download</button>';
+        card.querySelector('button').addEventListener('click', () => withBusy(async () => {
+          const fmt = $('fmt').value;
+          saveBlob(await svgToBlob(fig.svg, fig.w, fig.h, fmt), `${baseName()}_${safeName(p.name)}${EXT[fmt]}`);
+        }));
+        cards.appendChild(card);
+      });
+      plot.appendChild(cards);
+      st.lastSvg = 'each';
     } else {
       const { svg, w, h } = buildSvg(d);
       st.lastSvg = svg; st.lastSize = { w, h };
-      $('plot').innerHTML = svg;
+      plot.innerHTML = svg;
     }
+    updateDownloadLabel();
     $('table').innerHTML = buildTable(d);
+  }
+
+  function updateDownloadLabel() {
+    const each = $('split').value === 'each', fmt = $('fmt').value;
+    const n = st.lastData ? st.lastData.pies.length : 0;
+    $('download').textContent = !each ? 'Download image'
+      : fmt === 'pptx' ? `Download all (${n} slides)` : `Download all (${n} files, ZIP)`;
   }
 
   // ---------- export ----------
@@ -690,16 +717,113 @@
     return new Blob([b], { type: 'image/jpeg' });
   }
 
-  const EXT = { svg: '.svg', pdf: '.pdf', png: '.png', jpeg: '.jpg' };
+  const EXT = { svg: '.svg', pdf: '.pdf', png: '.png', jpeg: '.jpg', tiff: '.tif', pptx: '.pptx' };
+  const RASTER = new Set(['png', 'jpeg', 'tiff', 'pptx']);
+
+  async function rasterAtDpi(svg, w, h, opaque) {
+    const dpi = +$('dpi').value;
+    let scale = dpi / 96;
+    const maxPx = 120e6;
+    if (w * h * scale * scale > maxPx) scale = Math.sqrt(maxPx / (w * h));
+    return { canvas: await rasterize(svg, w, h, scale, opaque), dpi };
+  }
+
+  // PackBits (TIFF compression 32773) for one row.
+  function packBits(src) {
+    const n = src.length, out = new Uint8Array(n + Math.ceil(n / 128) + 1);
+    let i = 0, o = 0;
+    while (i < n) {
+      let run = 1;
+      while (i + run < n && run < 128 && src[i + run] === src[i]) run++;
+      if (run >= 2) { out[o++] = 257 - run; out[o++] = src[i]; i += run; continue; }
+      const start = i;
+      while (i < n && i - start < 128 && !(i + 1 < n && src[i] === src[i + 1])) i++;
+      if (i === start) i++;
+      out[o++] = i - start - 1;
+      out.set(src.subarray(start, i), o); o += i - start;
+    }
+    return out.subarray(0, o);
+  }
+
+  // Baseline RGB(A) TIFF, PackBits-compressed, with the DPI stored in the header.
+  function encodeTiff(canvas, dpi, alpha) {
+    const w = canvas.width, h = canvas.height, spp = alpha ? 4 : 3;
+    const px = canvas.getContext('2d').getImageData(0, 0, w, h).data;
+    const rows = [], row = new Uint8Array(w * spp);
+    let stripLen = 0;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0, s = y * w * 4, t = 0; x < w; x++, s += 4) {
+        row[t++] = px[s]; row[t++] = px[s + 1]; row[t++] = px[s + 2];
+        if (alpha) row[t++] = px[s + 3];
+      }
+      const pk = packBits(row).slice();
+      rows.push(pk); stripLen += pk.length;
+    }
+    const tags = [
+      [256, 4, 1, w], [257, 4, 1, h], [258, 3, spp, null], [259, 3, 1, 32773], [262, 3, 1, 2],
+      [273, 4, 1, null], [277, 3, 1, spp], [278, 4, 1, h], [279, 4, 1, stripLen],
+      [282, 5, 1, null], [283, 5, 1, null], [284, 3, 1, 1], [296, 3, 1, 2],
+    ];
+    if (alpha) tags.push([338, 3, 1, 2]);
+    const ifdLen = 2 + tags.length * 12 + 4;
+    const bpsOff = 8 + ifdLen, xresOff = bpsOff + 8, yresOff = xresOff + 8, stripOff = yresOff + 8;
+    const buf = new Uint8Array(stripOff + stripLen);
+    const dv = new DataView(buf.buffer);
+    buf.set([0x49, 0x49, 42, 0]); dv.setUint32(4, 8, true);
+    dv.setUint16(8, tags.length, true);
+    const ptr = { 258: bpsOff, 273: stripOff, 282: xresOff, 283: yresOff };
+    tags.forEach(([tag, type, count, val], i) => {
+      const e = 10 + i * 12;
+      dv.setUint16(e, tag, true); dv.setUint16(e + 2, type, true); dv.setUint32(e + 4, count, true);
+      const v = val == null ? ptr[tag] : val;
+      if (type === 3 && val != null) dv.setUint16(e + 8, v, true); else dv.setUint32(e + 8, v, true);
+    });
+    for (let k = 0; k < spp; k++) dv.setUint16(bpsOff + k * 2, 8, true);
+    dv.setUint32(xresOff, dpi, true); dv.setUint32(xresOff + 4, 1, true);
+    dv.setUint32(yresOff, dpi, true); dv.setUint32(yresOff + 4, 1, true);
+    let o = stripOff;
+    rows.forEach((r) => { buf.set(r, o); o += r.length; });
+    return new Blob([buf], { type: 'image/tiff' });
+  }
+
+  const scriptCache = {};
+  function loadScript(src) {
+    if (!scriptCache[src]) {
+      scriptCache[src] = new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = src; s.onload = resolve;
+        s.onerror = () => { delete scriptCache[src]; reject(new Error('could not load ' + src)); };
+        document.head.appendChild(s);
+      });
+    }
+    return scriptCache[src];
+  }
+
+  // One slide per figure; each picture is scaled to fit a 16:9 slide with a small margin.
+  async function buildPptx(figs) {
+    await loadScript('https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js');
+    const pres = new PptxGenJS();
+    pres.layout = 'LAYOUT_WIDE'; // 13.33 x 7.5 in
+    for (const { svg, w, h } of figs) {
+      const { canvas } = await rasterAtDpi(svg, w, h, opts.background === 'white');
+      const iw = w / 96, ih = h / 96;
+      const k = Math.min(1, 12.73 / iw, 6.9 / ih);
+      const sw = iw * k, sh = ih * k;
+      pres.addSlide().addImage({ data: canvas.toDataURL('image/png'), x: (13.333 - sw) / 2, y: (7.5 - sh) / 2, w: sw, h: sh });
+    }
+    return pres.write({ outputType: 'blob' });
+  }
 
   async function svgToBlob(svg, w, h, fmt) {
     if (fmt === 'svg') return new Blob(['<?xml version="1.0" encoding="UTF-8"?>\n' + svg], { type: 'image/svg+xml' });
+    if (fmt === 'pptx') return buildPptx([{ svg, w, h }]);
+    if (fmt === 'tiff') {
+      const opaque = opts.background === 'white';
+      const { canvas, dpi } = await rasterAtDpi(svg, w, h, opaque);
+      return encodeTiff(canvas, dpi, !opaque);
+    }
     if (fmt === 'png' || fmt === 'jpeg') {
-      const dpi = +$('dpi').value;
-      let scale = dpi / 96;
-      const maxPx = 120e6;
-      if (w * h * scale * scale > maxPx) scale = Math.sqrt(maxPx / (w * h));
-      const canvas = await rasterize(svg, w, h, scale, fmt === 'jpeg' || opts.background === 'white');
+      const { canvas, dpi } = await rasterAtDpi(svg, w, h, fmt === 'jpeg' || opts.background === 'white');
       const blob = await new Promise((r) => canvas.toBlob(r, 'image/' + fmt, 0.95));
       return setDpi(blob, fmt, dpi);
     }
@@ -716,31 +840,39 @@
     } finally { holder.remove(); }
   }
 
-  async function download() {
-    if (!st.lastSvg) return;
-    const fmt = $('fmt').value;
-    const name = $('fname').value.trim() || 'spice_plot';
-    const btn = $('download');
-    btn.disabled = true;
+  const baseName = () => $('fname').value.trim() || 'spice_plot';
+  const safeName = (s) => String(s).replace(/[\\/:*?"<>|]+/g, '_');
+
+  async function withBusy(fn) {
+    const btns = document.querySelectorAll('#download, .card button');
+    btns.forEach((b) => { b.disabled = true; });
     try {
-      if ($('split').value === 'each') {
-        const zip = new JSZip();
-        const d = st.lastData;
-        for (const p of d.pies) {
-          const { svg, w, h } = buildSvg({ ...d, pies: [p] });
-          const safe = String(p.name).replace(/[\\/:*?"<>|]+/g, '_');
-          zip.file(`${name}_${safe}${EXT[fmt]}`, await svgToBlob(svg, w, h, fmt));
-        }
-        saveBlob(await zip.generateAsync({ type: 'blob' }), name + '.zip');
-      } else {
-        const { w, h } = st.lastSize;
-        saveBlob(await svgToBlob(st.lastSvg, w, h, fmt), name + EXT[fmt]);
-      }
+      await fn();
     } catch (e) {
       alert('Export failed: ' + e.message);
     } finally {
-      btn.disabled = false;
+      btns.forEach((b) => { b.disabled = false; });
     }
+  }
+
+  function download() {
+    if (!st.lastSvg) return;
+    const fmt = $('fmt').value, name = baseName(), d = st.lastData;
+    return withBusy(async () => {
+      if ($('split').value !== 'each') {
+        const { svg, w, h } = buildSvg(d);
+        saveBlob(await svgToBlob(svg, w, h, fmt), name + EXT[fmt]);
+      } else if (fmt === 'pptx') {
+        saveBlob(await buildPptx(d.pies.map((p) => buildSvg({ ...d, pies: [p] }))), name + '.pptx');
+      } else {
+        const zip = new JSZip();
+        for (const p of d.pies) {
+          const { svg, w, h } = buildSvg({ ...d, pies: [p] });
+          zip.file(`${name}_${safeName(p.name)}${EXT[fmt]}`, await svgToBlob(svg, w, h, fmt));
+        }
+        saveBlob(await zip.generateAsync({ type: 'blob' }), name + '.zip');
+      }
+    });
   }
 
   function downloadCsv() {
@@ -760,9 +892,9 @@
   const DEMO_MARKERS = ['IFNg', 'TNFa', 'IL2'];
   const DEMO_COMBOS = [[1, 1, 1], [1, 1, 0], [1, 0, 1], [1, 0, 0], [0, 1, 1], [0, 1, 0], [0, 0, 1], [0, 0, 0]];
   const DEMO_VALUES = {
-    Healthy: [0.12, 0.35, 0.05, 0.40, 0.08, 0.30, 0.10, 98.60],
-    HIV: [0.02, 0.10, 0.01, 0.55, 0.02, 0.20, 0.03, 99.07],
-    Vaccinated: [0.45, 0.60, 0.15, 0.30, 0.25, 0.20, 0.12, 97.93],
+    Healthy: [8, 15, 4, 18, 5, 14, 6, 30],
+    HIV: [2, 6, 1, 25, 2, 12, 3, 49],
+    Vaccinated: [20, 22, 6, 12, 10, 8, 5, 17],
   };
 
   function demoTableAoa() {
@@ -819,10 +951,12 @@
   document.querySelectorAll('[data-key]').forEach((el) => el.addEventListener(el.tagName === 'SELECT' || el.type === 'checkbox' ? 'change' : 'input', render));
   const fmtChanged = () => {
     const v = $('fmt').value;
-    $('dpiLabel').hidden = !(v === 'png' || v === 'jpeg');
+    $('dpiLabel').hidden = !RASTER.has(v);
+    updateDownloadLabel();
     $('pdfHint').hidden = v !== 'pdf';
   };
   $('fmt').addEventListener('change', fmtChanged);
+  $('split').addEventListener('change', render);
   fmtChanged();
   $('download').addEventListener('click', download);
   $('downloadCsv').addEventListener('click', downloadCsv);
