@@ -4,7 +4,7 @@
 
   // ---------- palettes ----------
   // kept away from the red/orange/yellow slice hues so arcs stay distinguishable
-  const ARC_COLORS = ['#1B9E77', '#283593', '#8E44AD', '#E7298A', '#00838F', '#5D4037', '#607D8B', '#66A61E', '#1F78B4', '#000000'];
+  const ARC_COLORS = ['#A63BE0', '#19C3A6', '#2C7FB8', '#E7298A', '#8C510A', '#66A61E', '#5E3C99', '#01665E', '#B2182B', '#4D4D4D'];
   // index 0 = highest number of functions
   const COUNT_COLORS = ['#C62828', '#EF6C00', '#F9A825', '#2E7D32', '#1565C0', '#6A1B9A', '#4E342E', '#455A64', '#00838F', '#AD1457'];
   const COMBO_PALETTE = ['#1F77B4', '#FF7F0E', '#2CA02C', '#D62728', '#9467BD', '#8C564B', '#E377C2', '#7F7F7F', '#BCBD22', '#17BECF',
@@ -43,16 +43,17 @@
     return undefined;
   }
 
-  // "IFNg+TNFa-IL2+", "IFNg+ , TNFa-", "IL-2+" -> [{name, pos}]
+  // "IFNg+TNFa-IL2+", "IFNg+ , TNFa-", "IL-2+", "PD1negLAG3+", "Nrp1+2B4neg" -> [{name, key, pos}]
+  // A "-" followed by a digit is part of the name (IL-2); "neg"/"pos" are accepted as signs.
   function parseSegment(seg) {
     const s = seg.replace(/[−–]/g, '-').replace(/^\s*Q\d+\s*:\s*/i, '').trim();
     if (!s) return null;
-    const re = /([^\s,;+\-]+(?:-\d[^\s,;+\-]*)*)\s*([+-])/g;
+    const re = /([^\s,;]+?)\s*(\+|-(?!\d)|neg|pos)/gi;
     const toks = [];
     let m, last = 0;
     while ((m = re.exec(s))) {
       if (s.slice(last, m.index).replace(/[\s,;]/g, '') !== '') return null;
-      toks.push({ name: m[1], pos: m[2] === '+' });
+      toks.push({ name: m[1], key: m[1].toLowerCase(), pos: m[2] === '+' || m[2].toLowerCase() === 'pos' });
       last = re.lastIndex;
     }
     if (!toks.length || s.slice(last).replace(/[\s,;]/g, '') !== '') return null;
@@ -69,10 +70,10 @@
       toks = t.concat(toks);
     }
     const seen = new Map();
-    toks.forEach((t) => seen.set(t.name, t));
+    toks.forEach((t) => seen.set(t.key, t));
     return seen.size >= 2 ? [...seen.values()] : null;
   }
-  const keyOf = (toks) => toks.map((t) => t.name).sort().join('\u0001');
+  const keyOf = (toks) => toks.map((t) => t.key).sort().join('\u0001');
 
   function uniqueNames(samples) {
     const used = new Map();
@@ -95,14 +96,15 @@
 
     const cols = [];
     parsed.forEach((p, i) => { if (p && keyOf(p) === best) cols.push({ i, toks: p }); });
-    const signOf = (c, m) => c.toks.find((t) => t.name === m).pos;
+    const signOf = (c, key) => c.toks.find((t) => t.key === key).pos;
     // markers that are + in every column are parent gates (e.g. CD4+), not functions
-    const markers = cols[0].toks.map((t) => t.name).filter((m) => new Set(cols.map((c) => signOf(c, m))).size > 1);
+    const kept = cols[0].toks.filter((t) => new Set(cols.map((c) => signOf(c, t.key))).size > 1);
+    const markers = kept.map((t) => t.name);
     if (markers.length < 2) return null;
 
     const combos = [], colIdx = [], seen = new Set();
     cols.forEach((c) => {
-      const signs = markers.map((m) => signOf(c, m));
+      const signs = kept.map((t) => signOf(c, t.key));
       const k = signs.map(Number).join('');
       if (seen.has(k)) return;
       seen.add(k); combos.push(signs); colIdx.push(c.i);
@@ -260,23 +262,32 @@
     });
   }
 
+  // Color for slices with k positive markers; user overrides are kept per color mode.
   function countColor(k, nInc) {
+    const ov = st.countOverride[opts.colorMode + k];
+    if (ov) return ov;
+    if (opts.colorMode === 'gray') {
+      // black for all markers positive -> light gray for none
+      const v = Math.round(255 * 0.85 * (1 - k / Math.max(1, nInc))).toString(16).padStart(2, '0');
+      return '#' + v + v + v;
+    }
     if (k === 0) return NEG_COLOR;
-    return st.countOverride[k] || COUNT_COLORS[(nInc - k) % COUNT_COLORS.length];
+    return COUNT_COLORS[(nInc - k) % COUNT_COLORS.length];
   }
 
   function buildCountColors(nInc) {
     const box = $('countColors');
     box.hidden = opts.colorMode === 'combo';
-    const sig = 'n' + nInc;
+    const minK = opts.excludeNeg ? 1 : 0;
+    const sig = [opts.colorMode, nInc, minK].join('|');
     if (box.dataset.sig === sig) return;
     box.dataset.sig = sig;
     box.innerHTML = '';
-    for (let k = nInc; k >= 1; k--) {
+    for (let k = nInc; k >= minK; k--) {
       const lab = document.createElement('label');
-      lab.innerHTML = `<input type="color" value="${countColor(k, nInc)}"> ${countLabel(k)}`;
+      lab.innerHTML = `<input type="color" value="${countColor(k, nInc)}"> ${k} positive`;
       const inp = lab.querySelector('input');
-      inp.addEventListener('input', () => { st.countOverride[k] = inp.value; render(); });
+      inp.addEventListener('input', () => { st.countOverride[opts.colorMode + k] = inp.value; render(); });
       box.appendChild(lab);
     }
   }
@@ -367,7 +378,7 @@
       byK.forEach((js, k) => {
         const base = countColor(k, nInc);
         js.forEach((j, idx) => {
-          if (opts.colorMode === 'count' || js.length === 1 || k === 0) { colors[j] = base; return; }
+          if (opts.colorMode !== 'countShade' || js.length === 1 || k === 0) { colors[j] = base; return; }
           colors[j] = mix(base, '#ffffff', 0.6 * (idx / (js.length - 1))); // base -> lighter
         });
       });
@@ -396,7 +407,6 @@
   }
 
   const comboLabel = (signs, markers) => signs.map((s, i) => markers[i].label + (s ? '+' : '-')).join(' ');
-  const countLabel = (k) => (k === 0 ? 'None' : k === 1 ? '1 function' : `${k} functions`);
 
   // ---------- SVG rendering ----------
   const measureCtx = document.createElement('canvas').getContext('2d');
@@ -435,39 +445,70 @@
     const gridH = rows * cellH + (rows - 1) * o.spacing;
     const mainH = o.title ? fs * 1.4 * 1.8 : 0;
 
-    // legend blocks
+    // legend: a titled group for the arcs and one for the slices
     const detail = o.legendDetail === 'auto' ? (o.colorMode === 'combo' ? 'combo' : 'count') : o.legendDetail;
     const sliceItems = [];
     if (detail === 'combo') {
       d.combos.forEach((s, i) => sliceItems.push({ color: d.colors[i], label: comboLabel(s, d.markers) }));
     } else {
       const seen = new Set();
-      d.combos.forEach((s, i) => {
+      d.combos.forEach((s) => {
         const k = s.filter(Boolean).length;
         if (seen.has(k)) return;
         seen.add(k);
-        sliceItems.push({ color: o.colorMode === 'count' ? d.colors[i] : countColor(k, d.nInc), label: countLabel(k) });
+        sliceItems.push({ color: countColor(k, d.nInc), label: String(k) });
       });
     }
-    const arcItems = d.markers.map((m) => ({ color: m.color, label: m.label, arc: true }));
-    const lh = fs * 1.6, sw = fs;
-    const blockSize = (items) => ({ w: sw + 8 + Math.max(0, ...items.map((it) => textW(it.label, fs))), h: items.length * lh });
-    const b1 = blockSize(sliceItems), b2 = blockSize(arcItems);
+    const arcItems = d.markers.map((m) => ({ color: m.color, label: m.label }));
+    const groups = [{ title: o.arcTitle, items: arcItems }, { title: o.sliceTitle, items: sliceItems }].filter((g) => g.items.length);
+    const lh = fs * 1.6, sw = fs * 0.9;
     const showLegend = o.legendPos !== 'none' && nP > 0;
 
-    let W, H, legX, legY, leg2X, leg2Y;
+    // legend elements in legend-local coordinates; y is the top of a row
+    const leg = [];
+    let legW = 0, legH = 0;
     if (showLegend && o.legendPos === 'right') {
-      const lw = Math.max(b1.w, b2.w), lhTot = b1.h + lh * 0.8 + b2.h;
-      W = pad * 2 + gridW + fs * 2 + lw;
-      H = pad * 2 + mainH + Math.max(gridH, lhTot);
-      legX = pad + gridW + fs * 2; legY = pad + mainH + Math.max(0, (gridH - lhTot) / 2);
-      leg2X = legX; leg2Y = legY + b1.h + lh * 0.8;
+      let y = 0;
+      groups.forEach((g, gi) => {
+        if (gi) y += lh * 0.6;
+        if (g.title) { leg.push({ x: 0, y, s: g.title }); legW = Math.max(legW, textW(g.title, fs)); y += lh; }
+        g.items.forEach((it) => {
+          leg.push({ x: 0, y, c: it.color }, { x: sw + 6, y, s: it.label });
+          legW = Math.max(legW, sw + 6 + textW(it.label, fs));
+          y += lh;
+        });
+      });
+      legH = y;
     } else if (showLegend) {
-      const lw = b1.w + fs * 3 + b2.w;
-      W = pad * 2 + Math.max(gridW, lw);
-      H = pad * 2 + mainH + gridH + fs * 1.5 + Math.max(b1.h, b2.h);
-      legX = pad + Math.max(0, (W - pad * 2 - lw) / 2); legY = pad + mainH + gridH + fs * 1.5;
-      leg2X = legX + b1.w + fs * 3; leg2Y = legY;
+      // compact rows: "Arcs  ■ A  ■ B" / "Title  ■ 2  ■ 1  ■ 0", wrapping when wider than the pies
+      const titleW = Math.max(0, ...groups.map((g) => (g.title ? textW(g.title, fs) + fs : 0)));
+      const maxW = Math.max(gridW, 320);
+      let y = 0;
+      groups.forEach((g) => {
+        if (g.title) leg.push({ x: 0, y, s: g.title });
+        legW = Math.max(legW, titleW);
+        let x = titleW;
+        g.items.forEach((it) => {
+          const w = sw + 5 + textW(it.label, fs);
+          if (x > titleW && x + w > maxW) { x = titleW; y += lh; }
+          leg.push({ x, y, c: it.color }, { x: x + sw + 5, y, s: it.label });
+          legW = Math.max(legW, x + w);
+          x += w + fs;
+        });
+        y += lh;
+      });
+      legH = y;
+    }
+
+    let W, H, legX = 0, legY = 0;
+    if (showLegend && o.legendPos === 'right') {
+      W = pad * 2 + gridW + fs * 2 + legW;
+      H = pad * 2 + mainH + Math.max(gridH, legH);
+      legX = pad + gridW + fs * 2; legY = pad + mainH + Math.max(0, (gridH - legH) / 2);
+    } else if (showLegend) {
+      W = pad * 2 + Math.max(gridW, legW);
+      H = pad * 2 + mainH + gridH + fs + legH;
+      legX = pad + Math.max(0, (W - pad * 2 - legW) / 2); legY = pad + mainH + gridH + fs;
     } else {
       W = pad * 2 + gridW; H = pad * 2 + mainH + gridH;
     }
@@ -493,7 +534,7 @@
       out.push(`<g>`);
       if (o.showPieTitle) {
         const t = st.pieMode === 'group' ? `${p.name} (n=${p.n})` : p.name;
-        out.push(`<text x="${f(cx)}" y="${f(y0 + fs * 1.1)}" text-anchor="middle" font-weight="bold" fill="#111111">${esc(t)}</text>`);
+        out.push(`<text x="${f(cx)}" y="${f(y0 + fs * 1.1)}" text-anchor="middle" fill="#111111">${esc(t)}</text>`);
       }
       if (p.total <= 0) {
         out.push(`<path d="${sectorPath(cx, cy, inner, R, 0, 360)}" fill="#eeeeee" fill-rule="evenodd"/>`);
@@ -504,10 +545,17 @@
       // slices
       let cum = 0;
       const pos = p.frac.map((fr) => { const s = cum; cum += fr; return [s, cum]; });
+      // adjacent slices of the same color are drawn as one, so borders only separate color groups
+      const segs = [];
       p.frac.forEach((fr, j) => {
         if (fr <= 0) return;
-        const [a0, a1] = span(pos[j][0], pos[j][1]);
-        out.push(`<path d="${sectorPath(cx, cy, inner, R, a0, a1)}" fill="${d.colors[j]}" fill-rule="evenodd"${stroke}/>`);
+        const last = segs[segs.length - 1];
+        if (last && last.color === d.colors[j]) { last.t1 = pos[j][1]; last.fr += fr; }
+        else segs.push({ t0: pos[j][0], t1: pos[j][1], fr, color: d.colors[j] });
+      });
+      segs.forEach((s) => {
+        const [a0, a1] = span(s.t0, s.t1);
+        out.push(`<path d="${sectorPath(cx, cy, inner, R, a0, a1)}" fill="${s.color}" fill-rule="evenodd"${stroke}/>`);
       });
       // arcs: one ring per marker, covering slices where that marker is positive
       d.markers.forEach((m, mi) => {
@@ -520,6 +568,7 @@
           else runs.push([pos[j][0], pos[j][1]]);
         });
         runs.forEach(([t0, t1]) => {
+          if ((t1 - t0) * 360 < o.arcMinDeg) return;
           const [a0, a1] = span(t0, t1);
           out.push(`<path d="${sectorPath(cx, cy, r0, r1, a0, a1)}" fill="${m.color}" fill-rule="evenodd"/>`);
         });
@@ -527,26 +576,21 @@
       // percent labels
       if (o.labelMode === 'percent') {
         const lr = inner > 0 ? (inner + R) / 2 : R * 0.66;
-        p.frac.forEach((fr, j) => {
-          if (fr * 100 < o.labelMin || fr <= 0) return;
-          const [x, y] = pt(cx, cy, lr, ang((pos[j][0] + pos[j][1]) / 2));
-          const col = luminance(d.colors[j]) > 0.6 ? '#111111' : '#ffffff';
-          out.push(`<text x="${f(x)}" y="${f(y + fs * 0.3)}" text-anchor="middle" font-size="${f(fs * 0.8)}" fill="${col}">${(fr * 100).toFixed(1)}%</text>`);
+        segs.forEach((s) => {
+          if (s.fr * 100 < o.labelMin) return;
+          const [x, y] = pt(cx, cy, lr, ang((s.t0 + s.t1) / 2));
+          const col = luminance(s.color) > 0.6 ? '#111111' : '#ffffff';
+          out.push(`<text x="${f(x)}" y="${f(y + fs * 0.3)}" text-anchor="middle" font-size="${f(fs * 0.8)}" fill="${col}">${(s.fr * 100).toFixed(1)}%</text>`);
         });
       }
       out.push(`</g>`);
     });
 
-    if (showLegend) {
-      const block = (items, x, y) => items.forEach((it, i) => {
-        const yy = y + i * lh;
-        if (it.arc) out.push(`<rect x="${f(x)}" y="${f(yy + (lh - sw * 0.45) / 2)}" width="${f(sw)}" height="${f(sw * 0.45)}" fill="${it.color}"/>`);
-        else out.push(`<rect x="${f(x)}" y="${f(yy + (lh - sw) / 2)}" width="${f(sw)}" height="${f(sw)}" fill="${it.color}"/>`);
-        out.push(`<text x="${f(x + sw + 8)}" y="${f(yy + lh / 2 + fs * 0.35)}" fill="#222222">${esc(it.label)}</text>`);
-      });
-      block(sliceItems, legX, legY);
-      block(arcItems, leg2X, leg2Y);
-    }
+    leg.forEach((e) => {
+      const x = legX + e.x, y = legY + e.y;
+      if (e.c) out.push(`<rect x="${f(x)}" y="${f(y + (lh - sw) / 2)}" width="${f(sw)}" height="${f(sw)}" fill="${e.c}"/>`);
+      else out.push(`<text x="${f(x)}" y="${f(y + lh / 2 + fs * 0.35)}" fill="#222222">${esc(e.s)}</text>`);
+    });
     out.push('</svg>');
     return { svg: out.join(''), w: W, h: H };
   }
@@ -554,7 +598,7 @@
   // ---------- table ----------
   function buildTable(d) {
     if (!d.pies.length) return '<p class="hint">No pies selected.</p>';
-    let h = '<table class="data"><thead><tr><th>Combination</th><th>Functions</th>';
+    let h = '<table class="data"><thead><tr><th>Combination</th><th>No. positive</th>';
     d.pies.forEach((p) => { h += `<th>${esc(p.name)}</th>`; });
     h += '</tr></thead><tbody>';
     d.combos.forEach((s, j) => {
@@ -646,36 +690,51 @@
     return new Blob([b], { type: 'image/jpeg' });
   }
 
+  const EXT = { svg: '.svg', pdf: '.pdf', png: '.png', jpeg: '.jpg' };
+
+  async function svgToBlob(svg, w, h, fmt) {
+    if (fmt === 'svg') return new Blob(['<?xml version="1.0" encoding="UTF-8"?>\n' + svg], { type: 'image/svg+xml' });
+    if (fmt === 'png' || fmt === 'jpeg') {
+      const dpi = +$('dpi').value;
+      let scale = dpi / 96;
+      const maxPx = 120e6;
+      if (w * h * scale * scale > maxPx) scale = Math.sqrt(maxPx / (w * h));
+      const canvas = await rasterize(svg, w, h, scale, fmt === 'jpeg' || opts.background === 'white');
+      const blob = await new Promise((r) => canvas.toBlob(r, 'image/' + fmt, 0.95));
+      return setDpi(blob, fmt, dpi);
+    }
+    const { jsPDF } = window.jspdf;
+    const pw = w * 0.75, ph = h * 0.75;
+    const doc = new jsPDF({ orientation: pw > ph ? 'landscape' : 'portrait', unit: 'pt', format: [pw, ph] });
+    const holder = document.createElement('div');
+    holder.style.cssText = 'position:fixed;left:-99999px;top:0';
+    holder.innerHTML = svg;
+    document.body.appendChild(holder);
+    try {
+      await doc.svg(holder.firstChild, { x: 0, y: 0, width: pw, height: ph });
+      return doc.output('blob');
+    } finally { holder.remove(); }
+  }
+
   async function download() {
     if (!st.lastSvg) return;
     const fmt = $('fmt').value;
     const name = $('fname').value.trim() || 'spice_plot';
-    const { w, h } = st.lastSize;
     const btn = $('download');
     btn.disabled = true;
     try {
-      if (fmt === 'svg') {
-        saveBlob(new Blob(['<?xml version="1.0" encoding="UTF-8"?>\n' + st.lastSvg], { type: 'image/svg+xml' }), name + '.svg');
-      } else if (fmt === 'png' || fmt === 'jpeg') {
-        const dpi = +$('dpi').value;
-        let scale = dpi / 96;
-        const maxPx = 120e6;
-        if (w * h * scale * scale > maxPx) { scale = Math.sqrt(maxPx / (w * h)); }
-        const canvas = await rasterize(st.lastSvg, w, h, scale, fmt === 'jpeg' || opts.background === 'white');
-        const blob = await new Promise((r) => canvas.toBlob(r, 'image/' + fmt, 0.95));
-        saveBlob(await setDpi(blob, fmt, dpi), name + (fmt === 'png' ? '.png' : '.jpg'));
+      if ($('split').value === 'each') {
+        const zip = new JSZip();
+        const d = st.lastData;
+        for (const p of d.pies) {
+          const { svg, w, h } = buildSvg({ ...d, pies: [p] });
+          const safe = String(p.name).replace(/[\\/:*?"<>|]+/g, '_');
+          zip.file(`${name}_${safe}${EXT[fmt]}`, await svgToBlob(svg, w, h, fmt));
+        }
+        saveBlob(await zip.generateAsync({ type: 'blob' }), name + '.zip');
       } else {
-        const { jsPDF } = window.jspdf;
-        const pw = w * 0.75, ph = h * 0.75;
-        const doc = new jsPDF({ orientation: pw > ph ? 'landscape' : 'portrait', unit: 'pt', format: [pw, ph] });
-        const holder = document.createElement('div');
-        holder.style.cssText = 'position:fixed;left:-99999px;top:0';
-        holder.innerHTML = st.lastSvg;
-        document.body.appendChild(holder);
-        try {
-          await doc.svg(holder.firstChild, { x: 0, y: 0, width: pw, height: ph });
-          doc.save(name + '.pdf');
-        } finally { holder.remove(); }
+        const { w, h } = st.lastSize;
+        saveBlob(await svgToBlob(st.lastSvg, w, h, fmt), name + EXT[fmt]);
       }
     } catch (e) {
       alert('Export failed: ' + e.message);
@@ -688,7 +747,7 @@
     const d = st.lastData;
     if (!d) return;
     const q = (s) => `"${String(s).replace(/"/g, '""')}"`;
-    const head = ['Combination', 'Functions', ...d.pies.map((p) => `${p.name} (value)`), ...d.pies.map((p) => `${p.name} (%)`)];
+    const head = ['Combination', 'No. positive', ...d.pies.map((p) => `${p.name} (value)`), ...d.pies.map((p) => `${p.name} (%)`)];
     const lines = [head.map(q).join(',')];
     d.combos.forEach((s, j) => {
       lines.push([q(comboLabel(s, d.markers)), s.filter(Boolean).length,

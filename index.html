@@ -5,10 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SPICE Plot Generator</title>
 <meta name="description" content="Upload an Excel or CSV file to create SPICE polyfunctionality pie charts, adjust the plot and export SVG / PDF / PNG / JPEG. Data is processed locally in your browser.">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=3">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/svg2pdf.js@2.2.3/dist/svg2pdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 </head>
 <body>
 <header class="topbar">
@@ -67,7 +68,7 @@
       <p class="hint">Unchecked markers are collapsed (their combinations are summed). Display names can be edited, e.g. IFNg → IFN-γ.</p>
       <table class="markers"><thead><tr><th>Use</th><th>Display name</th><th>Arc</th></tr></thead><tbody id="markerRows"></tbody></table>
       <div class="row">
-        <label class="chk"><input type="checkbox" data-key="excludeNeg" checked> Exclude all-negative</label>
+        <label class="chk"><input type="checkbox" data-key="excludeNeg"> Exclude all-negative</label>
         <label class="chk"><input type="checkbox" data-key="clipNeg" checked> Treat negative values as 0</label>
       </div>
     </section>
@@ -77,15 +78,16 @@
       <div class="grid2">
         <label>Slice colors
           <select data-key="colorMode">
-            <option value="countShade">By # functions (shaded)</option>
-            <option value="count">By # functions (flat)</option>
+            <option value="gray" selected>Grayscale by # positive</option>
+            <option value="count">Colors by # positive</option>
+            <option value="countShade">Colors by # positive (shaded)</option>
             <option value="combo">One color per combination</option>
           </select>
         </label>
         <label>Slice order
           <select data-key="sortOrder">
-            <option value="desc"># functions: high → low</option>
-            <option value="asc"># functions: low → high</option>
+            <option value="desc"># positive: high → low</option>
+            <option value="asc"># positive: low → high</option>
           </select>
         </label>
       </div>
@@ -96,6 +98,7 @@
         <label>Arc width <input type="number" data-key="arcWidth" value="7" min="1" max="40" step="1"></label>
         <label>Arc gap <input type="number" data-key="arcGap" value="3" min="0" max="30" step="1"></label>
         <label>Arc distance from pie <input type="number" data-key="arcOffset" value="5" min="0" max="40" step="1"></label>
+        <label>Hide arc pieces &lt; (°) <input type="number" data-key="arcMinDeg" value="0" min="0" max="30" step="0.5"></label>
         <label>Start angle (°) <input type="number" data-key="startAngle" value="0" min="-360" max="360" step="15"></label>
         <label>Pies per row <input type="number" data-key="cols" value="3" min="1" max="12" step="1"></label>
         <label>Pie spacing <input type="number" data-key="spacing" value="30" min="0" max="200" step="5"></label>
@@ -119,6 +122,10 @@
       <h3>Text &amp; legend</h3>
       <label class="full">Title <input type="text" data-key="title" value="" placeholder="Optional"></label>
       <div class="grid2">
+        <label>Arc legend title <input type="text" data-key="arcTitle" value="Arcs"></label>
+        <label>Slice legend title <input type="text" data-key="sliceTitle" value="No. positive"></label>
+      </div>
+      <div class="grid2">
         <label>Font
           <select data-key="fontFamily">
             <option value="Arial, Helvetica, sans-serif">Arial</option>
@@ -129,15 +136,15 @@
         <label>Font size <input type="number" data-key="fontSize" value="14" min="6" max="40" step="1"></label>
         <label>Legend position
           <select data-key="legendPos">
+            <option value="bottom" selected>Bottom</option>
             <option value="right">Right</option>
-            <option value="bottom">Bottom</option>
             <option value="none">None</option>
           </select>
         </label>
         <label>Slice legend
           <select data-key="legendDetail">
             <option value="auto">Auto</option>
-            <option value="count">By # functions</option>
+            <option value="count">By # positive</option>
             <option value="combo">Every combination</option>
           </select>
         </label>
@@ -168,6 +175,12 @@
             <option value="600">600</option>
           </select>
         </label>
+        <label>Files
+          <select id="split">
+            <option value="one">All pies in one figure</option>
+            <option value="each">One file per pie (ZIP)</option>
+          </select>
+        </label>
       </div>
       <label class="full">File name <input type="text" id="fname" value="spice_plot"></label>
       <div class="btns">
@@ -187,6 +200,6 @@
   </main>
 </div>
 
-<script src="app.js"></script>
+<script src="app.js?v=3"></script>
 </body>
 </html>
