@@ -3,9 +3,8 @@
   const $ = (id) => document.getElementById(id);
 
   // ---------- palettes ----------
-  // kept away from the slice hues so arcs stay distinguishable; blue sits late in the order
-  // because the default slice ramp is blue, and three markers is the common case
-  const ARC_COLORS = ['#A63BE0', '#19C3A6', '#66A61E', '#E7298A', '#8C510A', '#2C7FB8', '#5E3C99', '#01665E', '#B2182B', '#4D4D4D'];
+  // kept away from the red/orange/yellow slice hues so arcs stay distinguishable
+  const ARC_COLORS = ['#A63BE0', '#19C3A6', '#2C7FB8', '#E7298A', '#8C510A', '#66A61E', '#5E3C99', '#01665E', '#B2182B', '#4D4D4D'];
   // index 0 = highest number of functions
   const COUNT_COLORS = ['#C62828', '#EF6C00', '#F9A825', '#2E7D32', '#1565C0', '#6A1B9A', '#4E342E', '#455A64', '#00838F', '#AD1457'];
   const COMBO_PALETTE = ['#1F77B4', '#FF7F0E', '#2CA02C', '#D62728', '#9467BD', '#8C564B', '#E377C2', '#7F7F7F', '#BCBD22', '#17BECF',
@@ -14,8 +13,7 @@
   // functions. The lightest step still clears 2:1 on the white plot surface.
   const SEQ_COLORS = ['#86b6ef', '#6da7ec', '#5598e7', '#3987e5', '#2a78d6',
     '#256abf', '#1c5cab', '#184f95', '#104281', '#0d366b'];
-  // the all-negative slice: neutral, and dark enough to clear 2:1 on the white plot surface
-  const NEG_COLOR = '#B4B4B4';
+  const NEG_COLOR = '#BDBDBD';
 
   const st = {
     wb: null, ds: null, fileBase: 'polypie',
