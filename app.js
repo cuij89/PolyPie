@@ -623,7 +623,9 @@
       segs.forEach((s) => {
         const [a0, a1] = span(s.t0, s.t1);
         const label = opts.colorMode === 'combo' || opts.colorMode === 'countShade' ? comboLabel(d.combos[s.j], d.markers) : `${s.k} positive`;
-        els.push({ t: 'sector', cx, cy, r0: inner, r1: R, a0, a1, fill: s.color, stroke, name: `${p.name} slice ${label} (${(s.fr * 100).toFixed(1)}%)` });
+        els.push({ t: 'sector', cx, cy, r0: inner, r1: R, a0, a1, fill: s.color, stroke,
+          name: `${p.name} slice ${label} (${(s.fr * 100).toFixed(1)}%)`,
+          tip: `${label} · ${(s.fr * 100).toFixed(1)}%` });
       });
       // pie outline (and inner edge for a donut)
       if (o.outlineWidth > 0) {
@@ -633,6 +635,7 @@
       // arcs: one ring per marker, covering slices where that marker is positive
       d.markers.forEach((m, mi) => {
         const r0 = R + o.arcOffset + mi * (o.arcWidth + o.arcGap), r1 = r0 + o.arcWidth;
+        const mPos = p.frac.reduce((a, fr, j) => a + (d.combos[j][mi] ? fr : 0), 0);
         const runs = [];
         p.frac.forEach((fr, j) => {
           if (fr <= 0 || !d.combos[j][mi]) return;
@@ -643,7 +646,9 @@
         runs.forEach(([t0, t1]) => {
           if ((t1 - t0) * 360 < o.arcMinDeg) return;
           const [a0, a1] = span(t0, t1);
-          els.push({ t: 'sector', cx, cy, r0, r1, a0, a1, fill: m.color, name: `${p.name} arc ${m.label}` });
+          els.push({ t: 'sector', cx, cy, r0, r1, a0, a1, fill: m.color,
+            name: `${p.name} arc ${m.label}`,
+            tip: `${m.label} · ${(mPos * 100).toFixed(1)}% positive` });
         });
       });
       // percent labels
@@ -676,7 +681,8 @@
       else if (e.t === 'rect') out.push(`<rect x="${f(e.x)}" y="${f(e.y)}" width="${f(e.w)}" height="${f(e.h)}" fill="${e.fill}"/>`);
       else if (e.t === 'sector') {
         const s = e.stroke ? ` stroke="${e.stroke.color}" stroke-width="${e.stroke.width}" stroke-linejoin="round"` : '';
-        out.push(`<path d="${sectorPath(e.cx, e.cy, e.r0, e.r1, e.a0, e.a1)}" fill="${e.fill}" fill-rule="evenodd"${s}/>`);
+        const head = `<path d="${sectorPath(e.cx, e.cy, e.r0, e.r1, e.a0, e.a1)}" fill="${e.fill}" fill-rule="evenodd"${s}`;
+        out.push(e.tip ? `${head}><title>${esc(e.tip)}</title></path>` : `${head}/>`);
       } else if (e.t === 'circle') {
         out.push(`<circle cx="${f(e.cx)}" cy="${f(e.cy)}" r="${f(e.r)}" fill="none" stroke="${e.color}" stroke-width="${e.width}"/>`);
       } else if (e.t === 'text') {
