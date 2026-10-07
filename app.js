@@ -12,7 +12,7 @@
   const NEG_COLOR = '#BDBDBD';
 
   const st = {
-    wb: null, ds: null, fileBase: 'spice',
+    wb: null, ds: null, fileBase: 'polypie',
     markers: [],          // {name, label, include, color}
     countOverride: {},    // k -> color chosen by user
     pieOff: new Set(),    // pie names hidden by user
@@ -277,7 +277,7 @@
 
   function showSections(on) {
     ['secPies', 'secMarkers', 'secStyle', 'secExport', 'tableWrap'].forEach((id) => { $(id).hidden = !on; });
-    if (!on) $('plot').innerHTML = '<p class="empty">Load a file or click an example on the left to preview the SPICE plot here.</p>';
+    if (!on) $('plot').innerHTML = '<p class="empty">Load a file or click an example on the left to preview the pie charts here.</p>';
   }
 
   function initFromDataset() {
@@ -953,7 +953,7 @@
     } finally { holder.remove(); }
   }
 
-  const baseName = () => $('fname').value.trim() || 'spice_plot';
+  const baseName = () => $('fname').value.trim() || 'polypie_plot';
   const safeName = (s) => String(s).replace(/[\\/:*?"<>|]+/g, '_');
 
   async function withBusy(fn) {
@@ -998,7 +998,7 @@
       lines.push([q(comboLabel(s, d.markers)), s.filter(Boolean).length,
         ...d.pies.map((p) => p.raw[j]), ...d.pies.map((p) => (p.frac[j] * 100).toFixed(4))].join(','));
     });
-    saveBlob(new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv' }), ($('fname').value.trim() || 'spice_plot') + '_data.csv');
+    saveBlob(new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv' }), ($('fname').value.trim() || 'polypie_plot') + '_data.csv');
   }
 
   // ---------- demo data & templates ----------
@@ -1057,8 +1057,8 @@
   $('sheet').addEventListener('change', (e) => loadSheet(e.target.value));
   $('demoA').addEventListener('click', () => loadDemo('a'));
   $('demoB').addEventListener('click', () => loadDemo('b'));
-  $('tplA').addEventListener('click', () => XLSX.writeFile(aoaWorkbook(demoTableAoa(), 'Combinations'), 'SPICE_template_A_combinations.xlsx'));
-  $('tplB').addEventListener('click', () => XLSX.writeFile(aoaWorkbook(demoFlowJoAoa(), 'FlowJo'), 'SPICE_template_B_flowjo.xlsx'));
+  $('tplA').addEventListener('click', () => XLSX.writeFile(aoaWorkbook(demoTableAoa(), 'Combinations'), 'PolyPie_template_A_combinations.xlsx'));
+  $('tplB').addEventListener('click', () => XLSX.writeFile(aoaWorkbook(demoFlowJoAoa(), 'FlowJo'), 'PolyPie_template_B_flowjo.xlsx'));
   $('pieMode').addEventListener('change', (e) => { st.pieMode = e.target.value; render(); });
   $('groupCol').addEventListener('change', (e) => { st.groupCol = e.target.value; render(); });
   $('pieAll').addEventListener('click', () => { st.pieOff.clear(); st.pieSig = ''; render(); });

@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SPICE Plot Generator</title>
-<meta name="description" content="Upload an Excel or CSV file to create SPICE polyfunctionality pie charts, adjust the plot and export SVG / PDF / PNG / JPEG. Data is processed locally in your browser.">
-<link rel="stylesheet" href="style.css?v=9">
+<title>PolyPie — polyfunctionality pie charts</title>
+<meta name="description" content="Upload an Excel or CSV file to create polyfunctionality pie charts, adjust the plot and export SVG / PDF / PNG / JPEG. Data is processed locally in your browser.">
+<link rel="stylesheet" href="style.css?v=10">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/svg2pdf.js@2.2.3/dist/svg2pdf.umd.min.js"></script>
@@ -13,8 +13,8 @@
 </head>
 <body>
 <header class="topbar">
-  <h1>SPICE Plot Generator</h1>
-  <span class="sub">Excel / CSV → SPICE pie charts · your data stays in your browser and is never uploaded</span>
+  <h1>PolyPie</h1>
+  <span class="sub">Excel / CSV → polyfunctionality pie charts · your data stays in your browser and is never uploaded</span>
 </header>
 
 <div class="notice" id="notice" hidden>
@@ -194,7 +194,7 @@
           </select>
         </label>
       </div>
-      <label class="full">File name <input type="text" id="fname" value="spice_plot"></label>
+      <label class="full">File name <input type="text" id="fname" value="polypie_plot"></label>
       <div class="btns">
         <button type="button" id="download" class="primary">Download image</button>
         <button type="button" id="downloadCsv" class="ghost">Download processed data (CSV)</button>
@@ -204,7 +204,7 @@
   </aside>
 
   <main class="preview">
-    <div class="canvasWrap" id="plot"><p class="empty">Load a file or click an example on the left to preview the SPICE plot here.</p></div>
+    <div class="canvasWrap" id="plot"><p class="empty">Load a file or click an example on the left to preview the pie charts here.</p></div>
     <details class="tableWrap" id="tableWrap" hidden>
       <summary>Processed data (%)</summary>
       <div id="table"></div>
@@ -212,6 +212,6 @@
   </main>
 </div>
 
-<script src="app.js?v=9"></script>
+<script src="app.js?v=10"></script>
 </body>
 </html>
