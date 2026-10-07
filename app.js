@@ -560,6 +560,11 @@
         const label = opts.colorMode === 'combo' || opts.colorMode === 'countShade' ? comboLabel(d.combos[s.j], d.markers) : `${s.k} positive`;
         els.push({ t: 'sector', cx, cy, r0: inner, r1: R, a0, a1, fill: s.color, stroke, name: `${p.name} slice ${label} (${(s.fr * 100).toFixed(1)}%)` });
       });
+      // pie outline (and inner edge for a donut)
+      if (o.outlineWidth > 0) {
+        els.push({ t: 'circle', cx, cy, r: R, color: o.outlineColor, width: o.outlineWidth, name: `${p.name} outline` });
+        if (inner > 0) els.push({ t: 'circle', cx, cy, r: inner, color: o.outlineColor, width: o.outlineWidth, name: `${p.name} inner outline` });
+      }
       // arcs: one ring per marker, covering slices where that marker is positive
       d.markers.forEach((m, mi) => {
         const r0 = R + o.arcOffset + mi * (o.arcWidth + o.arcGap), r1 = r0 + o.arcWidth;
@@ -607,6 +612,8 @@
       else if (e.t === 'sector') {
         const s = e.stroke ? ` stroke="${e.stroke.color}" stroke-width="${e.stroke.width}" stroke-linejoin="round"` : '';
         out.push(`<path d="${sectorPath(e.cx, e.cy, e.r0, e.r1, e.a0, e.a1)}" fill="${e.fill}" fill-rule="evenodd"${s}/>`);
+      } else if (e.t === 'circle') {
+        out.push(`<circle cx="${f(e.cx)}" cy="${f(e.cy)}" r="${f(e.r)}" fill="none" stroke="${e.color}" stroke-width="${e.width}"/>`);
       } else if (e.t === 'text') {
         out.push(`<text x="${f(e.x)}" y="${f(e.y + e.size * 0.35)}"${e.anchor === 'middle' ? ' text-anchor="middle"' : ''} font-size="${f(e.size)}"${e.bold ? ' font-weight="bold"' : ''} fill="${e.color}">${esc(e.s)}</text>`);
       }
@@ -847,6 +854,11 @@
           const range = full ? [0, 359.99] : [pptAng(e.a0), pptAng(e.a1)];
           if (e.r0 <= 0) slide.addShape(full ? 'ellipse' : 'pie', { ...box, ...style, ...(full ? {} : { angleRange: range }) });
           else slide.addShape('blockArc', { ...box, ...style, angleRange: range, arcThicknessRatio: (e.r1 - e.r0) / e.r1 });
+        } else if (e.t === 'circle') {
+          slide.addShape('ellipse', {
+            x: ox + L(e.cx - e.r), y: oy + L(e.cy - e.r), w: L(2 * e.r), h: L(2 * e.r),
+            line: { color: hex(e.color), width: pt(e.width) }, objectName: e.name,
+          });
         } else if (e.t === 'text') {
           const tw = L(textW(e.s, e.size) * 1.15 + e.size * 0.6), th = L(e.size * 1.5);
           slide.addText(e.s, {
