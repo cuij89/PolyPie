@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PolyPie — polyfunctionality pie charts</title>
 <meta name="description" content="Upload an Excel or CSV file to create polyfunctionality pie charts, adjust the plot and export SVG / PDF / PNG / JPEG. Data is processed locally in your browser.">
-<link rel="stylesheet" href="style.css?v=10">
+<link rel="stylesheet" href="style.css?v=11">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/svg2pdf.js@2.2.3/dist/svg2pdf.umd.min.js"></script>
@@ -48,11 +48,13 @@
         <summary>Supported file formats</summary>
         <p><b>A. Combination table:</b> one Boolean combination per row. Marker columns contain <code>+/-</code> (or 1/0, Y/N); every numeric column is one sample or group.</p>
         <p><b>B. Gate-name columns (FlowJo export):</b> one sample per row, with column names such as <code>CD4/IFNg+TNFa-IL2+ | Freq. of Parent</code> or <code>PD1+/LAG3-/TIGIT+</code>. An optional text column (e.g. Group) can be used to average by group. Rows named Mean / SD are ignored.</p>
+        <p><b>Averaging replicates:</b> add a <code>Group</code> column, give every replicate of the same condition the same name, then set <i>One pie per</i> to <b>Group (mean)</b>. Nothing else is needed.</p>
       </details>
     </section>
 
     <section id="secPies" hidden>
       <h2>2. Pies</h2>
+      <p class="hint">To average replicates, add a <b>Group</b> column to your file and give every replicate of a condition the same name. Leave the rest to the tool &mdash; markers, combinations and arcs are all read from the gate names.</p>
       <div class="row">
         <label>Layout
           <select id="split">
@@ -92,7 +94,8 @@
       <div class="grid2">
         <label>Slice colors
           <select data-key="colorMode">
-            <option value="gray" selected>Grayscale by # positive</option>
+            <option value="seq" selected>Blue ramp by # positive</option>
+            <option value="gray">Grayscale by # positive</option>
             <option value="count">Colors by # positive</option>
             <option value="countShade">Colors by # positive (shaded)</option>
             <option value="combo">One color per combination</option>
@@ -108,7 +111,7 @@
       <div id="countColors" class="countColors"></div>
       <div class="grid2">
         <label>Pie radius <input type="number" data-key="radius" value="110" min="30" max="400" step="5"></label>
-        <label>Hole ratio (0 = solid) <input type="number" data-key="innerRatio" value="0" min="0" max="0.9" step="0.05"></label>
+        <label>Hole ratio (0 = solid) <input type="number" data-key="innerRatio" value="0.35" min="0" max="0.9" step="0.05"></label>
         <label>Arc width <input type="number" data-key="arcWidth" value="7" min="1" max="40" step="1"></label>
         <label>Arc gap <input type="number" data-key="arcGap" value="3" min="0" max="30" step="1"></label>
         <label>Arc distance from pie <input type="number" data-key="arcOffset" value="5" min="0" max="40" step="1"></label>
@@ -212,6 +215,6 @@
   </main>
 </div>
 
-<script src="app.js?v=10"></script>
+<script src="app.js?v=11"></script>
 </body>
 </html>
