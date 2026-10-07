@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SPICE Plot Generator</title>
 <meta name="description" content="Upload an Excel or CSV file to create SPICE polyfunctionality pie charts, adjust the plot and export SVG / PDF / PNG / JPEG. Data is processed locally in your browser.">
-<link rel="stylesheet" href="style.css?v=7">
+<link rel="stylesheet" href="style.css?v=6">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/svg2pdf.js@2.2.3/dist/svg2pdf.umd.min.js"></script>
@@ -110,15 +110,8 @@
         <label>Start angle (°) <input type="number" data-key="startAngle" value="0" min="-360" max="360" step="15"></label>
         <label>Pies per row <input type="number" data-key="cols" value="3" min="1" max="12" step="1"></label>
         <label>Pie spacing <input type="number" data-key="spacing" value="30" min="0" max="200" step="5"></label>
-        <label>Combination dividers
-          <select data-key="dividers">
-            <option value="arcs" selected>Through arcs</option>
-            <option value="pie">On pie only</option>
-            <option value="none">None (merge same color)</option>
-          </select>
-        </label>
-        <label>Divider / border width <input type="number" data-key="strokeWidth" value="0.75" min="0" max="5" step="0.25"></label>
-        <label>Divider / border color <input type="color" data-key="strokeColor" value="#ffffff"></label>
+        <label>Slice border width <input type="number" data-key="strokeWidth" value="0.75" min="0" max="5" step="0.25"></label>
+        <label>Slice border color <input type="color" data-key="strokeColor" value="#ffffff"></label>
       </div>
       <div class="row">
         <label class="chk"><input type="checkbox" data-key="clockwise" checked> Clockwise</label>
@@ -211,6 +204,6 @@
   </main>
 </div>
 
-<script src="app.js?v=7"></script>
+<script src="app.js?v=6"></script>
 </body>
 </html>
