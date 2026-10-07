@@ -516,30 +516,31 @@
     const gx = pad + (showLegend && o.legendPos === 'bottom' ? Math.max(0, (W - pad * 2 - gridW) / 2) : 0);
     const gy = pad + mainH;
 
-    const out = [];
-    out.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="${esc(o.fontFamily)}" font-size="${fs}">`);
-    if (o.background === 'white') out.push(`<rect x="0" y="0" width="${W}" height="${H}" fill="#ffffff"/>`);
-    if (o.title) out.push(`<text x="${f(W / 2)}" y="${f(pad + fs * 1.4)}" text-anchor="middle" font-size="${f(fs * 1.4)}" font-weight="bold" fill="#111111">${esc(o.title)}</text>`);
+    // Drawing primitives shared by the SVG preview/export and the editable PPTX export.
+    // text y is the vertical center of the line.
+    const els = [];
+    if (o.background === 'white') els.push({ t: 'rect', x: 0, y: 0, w: W, h: H, fill: '#ffffff', name: 'Background' });
+    if (o.title) els.push({ t: 'text', x: W / 2, y: pad + fs * 0.9, s: o.title, size: fs * 1.4, anchor: 'middle', color: '#111111', bold: true, name: 'Title' });
 
     const sgn = o.clockwise ? 1 : -1;
     const ang = (t) => o.startAngle + sgn * t * 360;
     const span = (t0, t1) => { const a = ang(t0), b = ang(t1); return [Math.min(a, b), Math.max(a, b)]; };
     const inner = R * Math.min(0.95, Math.max(0, o.innerRatio));
-    const stroke = o.strokeWidth > 0 ? ` stroke="${o.strokeColor}" stroke-width="${o.strokeWidth}" stroke-linejoin="round"` : '';
+    const stroke = o.strokeWidth > 0 ? { color: o.strokeColor, width: o.strokeWidth } : null;
 
     d.pies.forEach((p, idx) => {
       const c = idx % cols, r = Math.floor(idx / cols);
       const x0 = gx + c * (cellW + o.spacing), y0 = gy + r * (cellH + o.spacing);
       const cx = x0 + outer, cy = y0 + titleH + outer;
-      out.push(`<g>`);
+      els.push({ t: 'group', name: p.name });
       if (o.showPieTitle) {
         const t = st.pieMode === 'group' ? `${p.name} (n=${p.n})` : p.name;
-        out.push(`<text x="${f(cx)}" y="${f(y0 + fs * 1.1)}" text-anchor="middle" fill="#111111">${esc(t)}</text>`);
+        els.push({ t: 'text', x: cx, y: y0 + fs * 0.75, s: t, size: fs, anchor: 'middle', color: '#111111', name: `${p.name} title` });
       }
       if (p.total <= 0) {
-        out.push(`<path d="${sectorPath(cx, cy, inner, R, 0, 360)}" fill="#eeeeee" fill-rule="evenodd"/>`);
-        out.push(`<text x="${f(cx)}" y="${f(cy + fs * 0.35)}" text-anchor="middle" fill="#888888">no data</text>`);
-        out.push(`</g>`);
+        els.push({ t: 'sector', cx, cy, r0: inner, r1: R, a0: 0, a1: 360, fill: '#eeeeee', name: `${p.name} empty` });
+        els.push({ t: 'text', x: cx, y: cy, s: 'no data', size: fs, anchor: 'middle', color: '#888888' });
+        els.push({ t: 'endgroup' });
         return;
       }
       // slices
@@ -549,13 +550,15 @@
       const segs = [];
       p.frac.forEach((fr, j) => {
         if (fr <= 0) return;
+        const k = d.combos[j].filter(Boolean).length;
         const last = segs[segs.length - 1];
         if (last && last.color === d.colors[j]) { last.t1 = pos[j][1]; last.fr += fr; }
-        else segs.push({ t0: pos[j][0], t1: pos[j][1], fr, color: d.colors[j] });
+        else segs.push({ t0: pos[j][0], t1: pos[j][1], fr, color: d.colors[j], k, j });
       });
       segs.forEach((s) => {
         const [a0, a1] = span(s.t0, s.t1);
-        out.push(`<path d="${sectorPath(cx, cy, inner, R, a0, a1)}" fill="${s.color}" fill-rule="evenodd"${stroke}/>`);
+        const label = opts.colorMode === 'combo' || opts.colorMode === 'countShade' ? comboLabel(d.combos[s.j], d.markers) : `${s.k} positive`;
+        els.push({ t: 'sector', cx, cy, r0: inner, r1: R, a0, a1, fill: s.color, stroke, name: `${p.name} slice ${label} (${(s.fr * 100).toFixed(1)}%)` });
       });
       // arcs: one ring per marker, covering slices where that marker is positive
       d.markers.forEach((m, mi) => {
@@ -570,7 +573,7 @@
         runs.forEach(([t0, t1]) => {
           if ((t1 - t0) * 360 < o.arcMinDeg) return;
           const [a0, a1] = span(t0, t1);
-          out.push(`<path d="${sectorPath(cx, cy, r0, r1, a0, a1)}" fill="${m.color}" fill-rule="evenodd"/>`);
+          els.push({ t: 'sector', cx, cy, r0, r1, a0, a1, fill: m.color, name: `${p.name} arc ${m.label}` });
         });
       });
       // percent labels
@@ -580,19 +583,36 @@
           if (s.fr * 100 < o.labelMin) return;
           const [x, y] = pt(cx, cy, lr, ang((s.t0 + s.t1) / 2));
           const col = luminance(s.color) > 0.6 ? '#111111' : '#ffffff';
-          out.push(`<text x="${f(x)}" y="${f(y + fs * 0.3)}" text-anchor="middle" font-size="${f(fs * 0.8)}" fill="${col}">${(s.fr * 100).toFixed(1)}%</text>`);
+          els.push({ t: 'text', x, y, s: `${(s.fr * 100).toFixed(1)}%`, size: fs * 0.8, anchor: 'middle', color: col });
         });
       }
-      out.push(`</g>`);
+      els.push({ t: 'endgroup' });
     });
 
     leg.forEach((e) => {
       const x = legX + e.x, y = legY + e.y;
-      if (e.c) out.push(`<rect x="${f(x)}" y="${f(y + (lh - sw) / 2)}" width="${f(sw)}" height="${f(sw)}" fill="${e.c}"/>`);
-      else out.push(`<text x="${f(x)}" y="${f(y + lh / 2 + fs * 0.35)}" fill="#222222">${esc(e.s)}</text>`);
+      if (e.c) els.push({ t: 'rect', x, y: y + (lh - sw) / 2, w: sw, h: sw, fill: e.c, name: 'Legend key' });
+      else els.push({ t: 'text', x, y: y + lh / 2, s: e.s, size: fs, anchor: 'start', color: '#222222', name: 'Legend text' });
+    });
+
+    return { svg: elementsToSvg(els, W, H), els, w: W, h: H };
+  }
+
+  function elementsToSvg(els, W, H) {
+    const out = [`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="${esc(opts.fontFamily)}" font-size="${opts.fontSize}">`];
+    els.forEach((e) => {
+      if (e.t === 'group') out.push('<g>');
+      else if (e.t === 'endgroup') out.push('</g>');
+      else if (e.t === 'rect') out.push(`<rect x="${f(e.x)}" y="${f(e.y)}" width="${f(e.w)}" height="${f(e.h)}" fill="${e.fill}"/>`);
+      else if (e.t === 'sector') {
+        const s = e.stroke ? ` stroke="${e.stroke.color}" stroke-width="${e.stroke.width}" stroke-linejoin="round"` : '';
+        out.push(`<path d="${sectorPath(e.cx, e.cy, e.r0, e.r1, e.a0, e.a1)}" fill="${e.fill}" fill-rule="evenodd"${s}/>`);
+      } else if (e.t === 'text') {
+        out.push(`<text x="${f(e.x)}" y="${f(e.y + e.size * 0.35)}"${e.anchor === 'middle' ? ' text-anchor="middle"' : ''} font-size="${f(e.size)}"${e.bold ? ' font-weight="bold"' : ''} fill="${e.color}">${esc(e.s)}</text>`);
+      }
     });
     out.push('</svg>');
-    return { svg: out.join(''), w: W, h: H };
+    return out.join('');
   }
 
   // ---------- table ----------
@@ -633,7 +653,7 @@
         card.innerHTML = fig.svg + '<button type="button" class="ghost">Download</button>';
         card.querySelector('button').addEventListener('click', () => withBusy(async () => {
           const fmt = $('fmt').value;
-          saveBlob(await svgToBlob(fig.svg, fig.w, fig.h, fmt), `${baseName()}_${safeName(p.name)}${EXT[fmt]}`);
+          saveBlob(await figToBlob(fig, fmt), `${baseName()}_${safeName(p.name)}${EXT[fmt]}`);
         }));
         cards.appendChild(card);
       });
@@ -718,7 +738,7 @@
   }
 
   const EXT = { svg: '.svg', pdf: '.pdf', png: '.png', jpeg: '.jpg', tiff: '.tif', pptx: '.pptx' };
-  const RASTER = new Set(['png', 'jpeg', 'tiff', 'pptx']);
+  const RASTER = new Set(['png', 'jpeg', 'tiff']);
 
   async function rasterAtDpi(svg, w, h, opaque) {
     const dpi = +$('dpi').value;
@@ -799,24 +819,51 @@
     return scriptCache[src];
   }
 
-  // One slide per figure; each picture is scaled to fit a 16:9 slide with a small margin.
+  // Editable PowerPoint: every slice, arc, label and legend item becomes a native shape or text box.
+  // One slide per figure, scaled to fill a 16:9 slide.
   async function buildPptx(figs) {
     await loadScript('https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js');
     const pres = new PptxGenJS();
-    pres.layout = 'LAYOUT_WIDE'; // 13.33 x 7.5 in
-    for (const { svg, w, h } of figs) {
-      const { canvas } = await rasterAtDpi(svg, w, h, opts.background === 'white');
-      const iw = w / 96, ih = h / 96;
-      const k = Math.min(1, 12.73 / iw, 6.9 / ih);
-      const sw = iw * k, sh = ih * k;
-      pres.addSlide().addImage({ data: canvas.toDataURL('image/png'), x: (13.333 - sw) / 2, y: (7.5 - sh) / 2, w: sw, h: sh });
+    pres.layout = 'LAYOUT_WIDE'; // 13.333 x 7.5 in
+    const fontFace = opts.fontFamily.split(',')[0].replace(/['"]/g, '').trim();
+    const hex = (c) => c.replace('#', '').toUpperCase();
+    // our angles: 0 = 12 o'clock, clockwise; PowerPoint: 0 = 3 o'clock, clockwise
+    const pptAng = (a) => (((a - 90) % 360) + 360) % 360;
+    for (const { els, w, h } of figs) {
+      const k = Math.min(12.73 / (w / 96), 6.9 / (h / 96));
+      const ox = (13.333 - (w / 96) * k) / 2, oy = (7.5 - (h / 96) * k) / 2;
+      const L = (px) => (px / 96) * k;
+      const pt = (px) => px * 0.75 * k;
+      const slide = pres.addSlide();
+      els.forEach((e) => {
+        if (e.t === 'rect') {
+          if (e.name === 'Background') return; // the slide itself is the background
+          slide.addShape('rect', { x: ox + L(e.x), y: oy + L(e.y), w: L(e.w), h: L(e.h), fill: { color: hex(e.fill) }, objectName: e.name });
+        } else if (e.t === 'sector') {
+          const box = { x: ox + L(e.cx - e.r1), y: oy + L(e.cy - e.r1), w: L(2 * e.r1), h: L(2 * e.r1) };
+          const style = { fill: { color: hex(e.fill) }, objectName: e.name };
+          if (e.stroke) style.line = { color: hex(e.stroke.color), width: pt(e.stroke.width) };
+          const full = e.a1 - e.a0 >= 359.999;
+          const range = full ? [0, 359.99] : [pptAng(e.a0), pptAng(e.a1)];
+          if (e.r0 <= 0) slide.addShape(full ? 'ellipse' : 'pie', { ...box, ...style, ...(full ? {} : { angleRange: range }) });
+          else slide.addShape('blockArc', { ...box, ...style, angleRange: range, arcThicknessRatio: (e.r1 - e.r0) / e.r1 });
+        } else if (e.t === 'text') {
+          const tw = L(textW(e.s, e.size) * 1.15 + e.size * 0.6), th = L(e.size * 1.5);
+          slide.addText(e.s, {
+            x: ox + L(e.x) - (e.anchor === 'middle' ? tw / 2 : 0), y: oy + L(e.y) - th / 2, w: tw, h: th,
+            fontFace, fontSize: pt(e.size), color: hex(e.color), bold: !!e.bold,
+            align: e.anchor === 'middle' ? 'center' : 'left', valign: 'middle', margin: 0, objectName: e.name,
+          });
+        }
+      });
     }
     return pres.write({ outputType: 'blob' });
   }
 
-  async function svgToBlob(svg, w, h, fmt) {
+  async function figToBlob(fig, fmt) {
+    const { svg, w, h } = fig;
     if (fmt === 'svg') return new Blob(['<?xml version="1.0" encoding="UTF-8"?>\n' + svg], { type: 'image/svg+xml' });
-    if (fmt === 'pptx') return buildPptx([{ svg, w, h }]);
+    if (fmt === 'pptx') return buildPptx([fig]);
     if (fmt === 'tiff') {
       const opaque = opts.background === 'white';
       const { canvas, dpi } = await rasterAtDpi(svg, w, h, opaque);
@@ -860,15 +907,15 @@
     const fmt = $('fmt').value, name = baseName(), d = st.lastData;
     return withBusy(async () => {
       if ($('split').value !== 'each') {
-        const { svg, w, h } = buildSvg(d);
-        saveBlob(await svgToBlob(svg, w, h, fmt), name + EXT[fmt]);
+        const fig = buildSvg(d);
+        saveBlob(await figToBlob(fig, fmt), name + EXT[fmt]);
       } else if (fmt === 'pptx') {
         saveBlob(await buildPptx(d.pies.map((p) => buildSvg({ ...d, pies: [p] }))), name + '.pptx');
       } else {
         const zip = new JSZip();
         for (const p of d.pies) {
-          const { svg, w, h } = buildSvg({ ...d, pies: [p] });
-          zip.file(`${name}_${safeName(p.name)}${EXT[fmt]}`, await svgToBlob(svg, w, h, fmt));
+          const fig = buildSvg({ ...d, pies: [p] });
+          zip.file(`${name}_${safeName(p.name)}${EXT[fmt]}`, await figToBlob(fig, fmt));
         }
         saveBlob(await zip.generateAsync({ type: 'blob' }), name + '.zip');
       }
