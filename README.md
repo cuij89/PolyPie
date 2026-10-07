@@ -18,6 +18,25 @@ A browser-based tool that turns an Excel / CSV file into polyfunctionality pie c
 
 **Averaging replicates** — add a `Group` column and give every replicate of the same condition the same name, then set *One pie per* to **Group (mean)**. Nothing else is needed: markers, combinations and arcs all come from the gate names.
 
+## Statistics
+
+With *One pie per* set to **Group (mean)**, the **Statistics** section adds a companion bar chart
+(mean % ± SD per combination, one bar per group, combinations named by a +/- matrix under the axis)
+and compares two groups:
+
+- **Overall** — a permutation test on the summed absolute difference between the two groups' mean
+  compositions: *do these two distributions differ?* This is the result to quote.
+- **Per combination** — a two-sided rank (Mann–Whitney) test run as an exact permutation, so the
+  tied zeros common in flow data are handled correctly, with Benjamini–Hochberg FDR across
+  combinations. **Exploratory only**: the slices sum to 100%, so combinations are not independent —
+  one rising forces others down.
+
+Both are exact when every group assignment can be enumerated, otherwise sampled from 20,000
+permutations. With few replicates the smallest reachable p is large (at n=3 vs n=3 it is 0.1, so
+nothing can reach significance). Replicates with no events have no composition and are left out of
+the means and the tests; the panel says how many. The bar chart and a statistics CSV export
+separately.
+
 ## Options
 
 Pie selection or per-group means, marker on/off (collapses combinations), marker display names and arc colors, slice coloring, sort order, radius / donut hole / arc width & spacing, start angle and direction, percent labels, title, font, legend position, background. Export as SVG, PDF (vector), PNG or JPEG (150/300/600 DPI, DPI written into the file), plus the processed data as CSV.

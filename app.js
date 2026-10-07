@@ -13,6 +13,8 @@
   // functions. The lightest step still clears 2:1 on the white plot surface.
   const SEQ_COLORS = ['#86b6ef', '#6da7ec', '#5598e7', '#3987e5', '#2a78d6',
     '#256abf', '#1c5cab', '#184f95', '#104281', '#0d366b'];
+  // groups in the bar chart are categorical identity, so a fixed-order categorical set
+  const GROUP_COLORS = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948'];
   const NEG_COLOR = '#BDBDBD';
 
   const st = {
@@ -21,7 +23,7 @@
     countOverride: {},    // k -> color chosen by user
     pieOff: new Set(),    // pie names hidden by user
     pieMode: 'sample', groupCol: '',
-    pieSig: '', lastSvg: '', lastSize: null, lastData: null,
+    pieSig: '', lastSvg: '', lastSize: null, lastData: null, lastBar: null, lastStats: null,
   };
   let opts = {};
 
@@ -280,7 +282,7 @@
   }
 
   function showSections(on) {
-    ['secPies', 'secMarkers', 'secStyle', 'secExport', 'tableWrap'].forEach((id) => { $(id).hidden = !on; });
+    ['secPies', 'secMarkers', 'secStyle', 'secStats', 'secExport', 'statsWrap', 'tableWrap'].forEach((id) => { $(id).hidden = !on; });
     if (!on) $('plot').innerHTML = '<p class="empty">Load a file or click an example on the left to preview the pie charts here.</p>';
   }
 
@@ -413,7 +415,7 @@
         groups.get(g).push(agg(s.values));
       });
       pies = [...groups].map(([g, arr]) => ({
-        name: g, n: arr.length,
+        name: g, n: arr.length, repValues: arr,
         values: arr[0].map((_, j) => arr.reduce((a, v) => a + v[j], 0) / arr.length),
       }));
     } else {
@@ -453,6 +455,20 @@
       p.raw = vals;
       p.frac = vals.map((v) => (total > 0 ? Math.max(0, v) / total : 0));
       p.total = total;
+      // Each replicate's own composition, for the error bars and the tests. A replicate with no
+      // events has no composition to speak of, so it is dropped rather than read as all-negative.
+      // The group pie is then the mean of the remaining compositions, which is what the bars show.
+      if (p.repValues) {
+        const reps = [];
+        let dropped = 0;
+        p.repValues.forEach((rv) => {
+          const v = order.map((j) => Math.max(0, opts.clipNeg ? Math.max(0, rv[j]) : rv[j]));
+          const t = v.reduce((a, x) => a + x, 0);
+          if (t > 0) reps.push(v.map((x) => x / t)); else dropped++;
+        });
+        p.reps = reps; p.dropped = dropped; p.n = reps.length;
+        if (reps.length) p.frac = p.frac.map((_, j) => reps.reduce((a, r) => a + r[j], 0) / reps.length);
+      }
     });
 
     const markers = inc.map((i) => st.markers[i]);
@@ -470,6 +486,104 @@
   }
 
   const comboLabel = (signs, markers) => signs.map((s, i) => markers[i].label + (s ? '+' : '-')).join(' ');
+
+  // ---------- statistics ----------
+  // Group comparisons are exact permutation tests whenever every label assignment can be
+  // enumerated, which it can at the replicate counts this tool sees. That keeps the many tied
+  // zeros in flow data honest, where a normal approximation would not. Bigger designs sample.
+  const MAX_EXACT = 200000, MC_PERMS = 20000;
+
+  const mean = (xs) => xs.reduce((a, v) => a + v, 0) / xs.length;
+  const sd = (xs) => {
+    if (xs.length < 2) return 0;
+    const m = mean(xs);
+    return Math.sqrt(xs.reduce((a, v) => a + (v - m) * (v - m), 0) / (xs.length - 1));
+  };
+  const nChooseK = (n, k) => { let r = 1; for (let i = 1; i <= k; i++) r = (r * (n - k + i)) / i; return Math.round(r); };
+
+  function midRanks(v) {
+    const idx = v.map((_, i) => i).sort((a, b) => v[a] - v[b]);
+    const r = new Array(v.length);
+    for (let i = 0; i < idx.length;) {
+      let j = i;
+      while (j + 1 < idx.length && v[idx[j + 1]] === v[idx[i]]) j++;
+      const avg = (i + j) / 2 + 1; // midranks, so ties do not inflate the statistic
+      for (let k = i; k <= j; k++) r[idx[k]] = avg;
+      i = j + 1;
+    }
+    return r;
+  }
+
+  // every k-subset of 0..n-1, in lexicographic order
+  function eachSubset(n, k, fn) {
+    const sel = Array.from({ length: k }, (_, i) => i);
+    for (;;) {
+      fn(sel);
+      let i = k - 1;
+      while (i >= 0 && sel[i] === n - k + i) i--;
+      if (i < 0) return;
+      sel[i]++;
+      for (let j = i + 1; j < k; j++) sel[j] = sel[j - 1] + 1;
+    }
+  }
+
+  // A and B hold one composition vector per replicate. Returns a two-sided rank p-value per
+  // combination plus one overall p-value for "these two distributions differ", the latter on
+  // the summed absolute difference in mean composition - the pies are compositional, so the
+  // per-combination values are not independent and the overall test is the sounder read.
+  function compareGroups(A, B) {
+    const m = A[0].length, nA = A.length, nB = B.length, N = nA + nB;
+    const pool = A.concat(B);
+    const R = [], tot = [];
+    for (let j = 0; j < m; j++) {
+      R.push(midRanks(pool.map((v) => v[j])));
+      tot.push(pool.reduce((a, v) => a + v[j], 0));
+    }
+    const ER = (nA * (N + 1)) / 2;
+    const stat = (sel) => {
+      const dev = new Array(m);
+      let T = 0;
+      for (let j = 0; j < m; j++) {
+        let rs = 0, sa = 0;
+        for (let i = 0; i < nA; i++) { rs += R[j][sel[i]]; sa += pool[sel[i]][j]; }
+        dev[j] = Math.abs(rs - ER);
+        T += Math.abs(sa / nA - (tot[j] - sa) / nB);
+      }
+      return { dev, T };
+    };
+    const obs = stat(Array.from({ length: nA }, (_, i) => i));
+    const hitJ = new Array(m).fill(0);
+    let hitT = 0, seen = 0;
+    const count = (x) => {
+      seen++;
+      for (let j = 0; j < m; j++) if (x.dev[j] >= obs.dev[j] - 1e-9) hitJ[j]++;
+      if (x.T >= obs.T - 1e-12) hitT++;
+    };
+    const exact = nChooseK(N, nA) <= MAX_EXACT;
+    if (exact) eachSubset(N, nA, (sel) => count(stat(sel)));
+    else {
+      const idx = pool.map((_, i) => i);
+      for (let b = 0; b < MC_PERMS; b++) {
+        for (let i = N - 1; i > 0; i--) { const r = Math.floor(Math.random() * (i + 1)); [idx[i], idx[r]] = [idx[r], idx[i]]; }
+        count(stat(idx.slice(0, nA)));
+      }
+    }
+    // a sampled p-value is never reported as 0
+    const adj = exact ? (h) => h / seen : (h) => (h + 1) / (seen + 1);
+    return { p: hitJ.map(adj), pOverall: adj(hitT), exact, nPerm: seen };
+  }
+
+  // Benjamini-Hochberg false discovery rate
+  function bhAdjust(ps) {
+    const m = ps.length, ord = ps.map((_, i) => i).sort((a, b) => ps[a] - ps[b]);
+    const q = new Array(m);
+    let prev = 1;
+    for (let r = m - 1; r >= 0; r--) { const i = ord[r]; prev = Math.min(prev, (ps[i] * m) / (r + 1)); q[i] = prev; }
+    return q;
+  }
+
+  const stars = (q) => (q < 0.001 ? '***' : q < 0.01 ? '**' : q < 0.05 ? '*' : '');
+  const fmtP = (v) => (v < 0.0001 ? '<0.0001' : v.toFixed(4));
 
   // ---------- SVG rendering ----------
   const measureCtx = document.createElement('canvas').getContext('2d');
@@ -676,7 +790,10 @@
     els.forEach((e) => {
       if (e.t === 'group') out.push('<g>');
       else if (e.t === 'endgroup') out.push('</g>');
-      else if (e.t === 'rect') out.push(`<rect x="${f(e.x)}" y="${f(e.y)}" width="${f(e.w)}" height="${f(e.h)}" fill="${e.fill}"/>`);
+      else if (e.t === 'rect') {
+        const head = `<rect x="${f(e.x)}" y="${f(e.y)}" width="${f(e.w)}" height="${f(e.h)}" fill="${e.fill}"`;
+        out.push(e.tip ? `${head}><title>${esc(e.tip)}</title></rect>` : `${head}/>`);
+      }
       else if (e.t === 'sector') {
         const s = e.stroke ? ` stroke="${e.stroke.color}" stroke-width="${e.stroke.width}" stroke-linejoin="round"` : '';
         const head = `<path d="${sectorPath(e.cx, e.cy, e.r0, e.r1, e.a0, e.a1)}" fill="${e.fill}" fill-rule="evenodd"${s}`;
@@ -684,11 +801,111 @@
       } else if (e.t === 'circle') {
         out.push(`<circle cx="${f(e.cx)}" cy="${f(e.cy)}" r="${f(e.r)}" fill="none" stroke="${e.color}" stroke-width="${e.width}"/>`);
       } else if (e.t === 'text') {
-        out.push(`<text x="${f(e.x)}" y="${f(e.y + e.size * 0.35)}"${e.anchor === 'middle' ? ' text-anchor="middle"' : ''} font-size="${f(e.size)}"${e.bold ? ' font-weight="bold"' : ''} fill="${e.color}">${esc(e.s)}</text>`);
+        const head = `<text x="${f(e.x)}" y="${f(e.y + e.size * 0.35)}"${e.anchor === 'middle' ? ' text-anchor="middle"' : ''} font-size="${f(e.size)}"${e.bold ? ' font-weight="bold"' : ''} fill="${e.color}">`;
+        out.push(`${head}${e.tip ? `<title>${esc(e.tip)}</title>` : ''}${esc(e.s)}</text>`);
       }
     });
     out.push('</svg>');
     return out.join('');
+  }
+
+  // Mean +/- SD per combination, one bar per group: the companion to the pies, because a pie
+  // cannot carry an error bar. Combinations are named by a +/- matrix under the axis instead of
+  // rotated labels. Bars, error bars and gridlines are all rects, so the PPTX export - which
+  // speaks rect / sector / circle / text - gets every one of them as a real shape too.
+  function buildBarSvg(d, res) {
+    const o = opts, fs = o.fontSize, pad = Math.max(10, fs);
+    const pies = d.pies, m = d.combos.length, nG = pies.length, nM = d.markers.length;
+    if (!m || !nG) return null;
+
+    const cells = pies.map((p) => d.combos.map((_, j) => {
+      const xs = (p.reps && p.reps.length ? p.reps : [p.frac]).map((r) => r[j] * 100);
+      return { m: mean(xs), s: xs.length > 1 ? sd(xs) : 0 };
+    }));
+
+    const barW = Math.max(6, Math.round(fs * 0.9)), barGap = 2;
+    const groupGap = Math.max(fs, barW);
+    const cellW = nG * barW + (nG - 1) * barGap;
+    const plotW = m * cellW + (m - 1) * groupGap;
+    const plotH = Math.max(140, Math.round(o.radius * 1.6));
+
+    // y scale, rounded out to a readable step
+    const hi = Math.max(0.01, ...cells.flat().map((c) => c.m + c.s));
+    const p10 = Math.pow(10, Math.floor(Math.log10(hi / 4)));
+    const step = [1, 2, 2.5, 5, 10].map((x) => x * p10).find((x) => x >= hi / 4) || 10 * p10;
+    const yMax = Math.ceil(hi / step) * step;
+    const ticks = [];
+    for (let v = 0; v <= yMax + 1e-9; v += step) ticks.push(v);
+    const tickLab = (v) => (step < 1 ? v.toFixed(1) : String(Math.round(v)));
+
+    const leftW = Math.max(...ticks.map((v) => textW(tickLab(v), fs)), ...d.markers.map((k) => textW(k.label, fs))) + fs * 0.7;
+    const legend = pies.map((p, gi) => ({ s: `${p.name} (n=${p.n || 1})`, c: GROUP_COLORS[gi % GROUP_COLORS.length] }));
+    const legendW = legend.reduce((a, it) => a + fs * 1.2 + textW(it.s, fs) + fs, -fs);
+
+    const titleH = o.title ? fs * 2 : 0;
+    const starH = res ? fs * 1.3 : fs * 0.4;
+    const capH = fs * 1.4;                                  // "% of total" caption above the axis
+    const matrixH = fs * (1.6 + Math.max(0, nM - 1) * 1.25);
+    const legendH = fs * 2;
+    const x0 = pad + leftW;
+    const W = Math.round(Math.max(x0 + plotW + pad, pad * 2 + legendW));
+    const H = Math.round(pad * 2 + titleH + capH + starH + plotH + matrixH + legendH);
+    const yTop = pad + titleH + capH + starH;
+    const yBase = yTop + plotH;
+    const Y = (v) => yBase - (v / yMax) * plotH;
+
+    const els = [];
+    if (o.background === 'white') els.push({ t: 'rect', x: 0, y: 0, w: W, h: H, fill: '#ffffff', name: 'Background' });
+    if (o.title) els.push({ t: 'text', x: W / 2, y: pad + fs, s: o.title, size: fs * 1.25, anchor: 'middle', color: '#111111', bold: true, name: 'Title' });
+    els.push({ t: 'text', x: pad, y: yTop - fs * 0.8, s: '% of total', size: fs, anchor: 'start', color: '#444444', name: 'Y axis caption' });
+
+    ticks.forEach((v) => {
+      els.push({ t: 'rect', x: x0, y: Y(v), w: plotW, h: v === 0 ? 1.2 : 1, fill: v === 0 ? '#444444' : '#e8e8e8', name: `Gridline ${tickLab(v)}` });
+      els.push({ t: 'text', x: x0 - fs * 0.45 - textW(tickLab(v), fs), y: Y(v), s: tickLab(v), size: fs, anchor: 'start', color: '#444444', name: `Y label ${tickLab(v)}` });
+    });
+
+    d.combos.forEach((cmb, j) => {
+      const gx = x0 + j * (cellW + groupGap);
+      const label = comboLabel(cmb, d.markers);
+      pies.forEach((p, gi) => {
+        const c = cells[gi][j], bx = gx + gi * (barW + barGap), by = Y(Math.min(c.m, yMax));
+        els.push({ t: 'rect', x: bx, y: by, w: barW, h: Math.max(0, yBase - by),
+          fill: GROUP_COLORS[gi % GROUP_COLORS.length],
+          name: `${p.name} ${label} mean ${c.m.toFixed(2)}%`,
+          tip: `${p.name} \u00b7 ${label}\n${c.m.toFixed(2)}% \u00b1 ${c.s.toFixed(2)} SD (n=${p.n || 1})` });
+        if (c.s > 0) {
+          const top = Y(Math.min(yMax, c.m + c.s)), bot = Y(Math.max(0, c.m - c.s));
+          const cx = bx + barW / 2, wv = 1.4, cap = Math.max(4, barW * 0.55);
+          els.push({ t: 'rect', x: cx - wv / 2, y: top, w: wv, h: Math.max(0, bot - top), fill: '#333333', name: `${p.name} ${label} SD` });
+          els.push({ t: 'rect', x: cx - cap / 2, y: top, w: cap, h: wv, fill: '#333333', name: 'SD cap' });
+          els.push({ t: 'rect', x: cx - cap / 2, y: bot - wv, w: cap, h: wv, fill: '#333333', name: 'SD cap' });
+        }
+      });
+      if (res && res.star[j]) {
+        els.push({ t: 'text', x: gx + cellW / 2, y: yTop - fs * 0.55, s: res.star[j], size: fs * 1.1,
+          anchor: 'middle', color: '#111111', bold: true, name: `Significance ${label}`,
+          tip: `${label} \u00b7 p = ${fmtP(res.p[j])}, q = ${fmtP(res.q[j])}` });
+      }
+      d.markers.forEach((mk, mi) => {
+        els.push({ t: 'text', x: gx + cellW / 2, y: yBase + fs * (1 + mi * 1.25), s: cmb[mi] ? '+' : '\u2212',
+          size: fs, anchor: 'middle', color: cmb[mi] ? '#111111' : '#aaaaaa', name: `${label} ${mk.label}` });
+      });
+    });
+
+    d.markers.forEach((mk, mi) => {
+      els.push({ t: 'text', x: x0 - fs * 0.45 - textW(mk.label, fs), y: yBase + fs * (1 + mi * 1.25),
+        s: mk.label, size: fs, anchor: 'start', color: '#444444', name: `Row ${mk.label}` });
+    });
+
+    let lx = pad + Math.max(0, (W - pad * 2 - legendW) / 2);
+    const ly = H - pad - fs * 0.7;
+    legend.forEach((it) => {
+      els.push({ t: 'rect', x: lx, y: ly - fs * 0.45, w: fs * 0.9, h: fs * 0.9, fill: it.c, name: `Legend swatch ${it.s}` });
+      els.push({ t: 'text', x: lx + fs * 1.2, y: ly, s: it.s, size: fs, anchor: 'start', color: '#222222', name: `Legend ${it.s}` });
+      lx += fs * 1.2 + textW(it.s, fs) + fs;
+    });
+
+    return { svg: elementsToSvg(els, W, H), els, w: W, h: H };
   }
 
   // ---------- table ----------
@@ -741,7 +958,100 @@
       plot.innerHTML = svg;
     }
     updateDownloadLabel();
+    renderStats(d);
     $('table').innerHTML = buildTable(d);
+  }
+
+  // Keeps a group select in step with the pies on screen without losing the user's pick.
+  function syncGroupSelect(sel, names, dflt) {
+    const sig = names.join('');
+    if (sel.dataset.sig === sig) return;
+    const keep = sel.value;
+    sel.dataset.sig = sig;
+    sel.innerHTML = '';
+    names.forEach((n) => sel.add(new Option(n, n)));
+    sel.value = names.includes(keep) ? keep : (names[dflt] || names[0] || '');
+  }
+
+  function renderStats(d) {
+    const on = $('statsOn').checked && st.pieMode === 'group';
+    $('statsPair').hidden = !on;
+    $('statsWrap').hidden = !on;
+    st.lastStats = null; st.lastBar = null;
+    if (!on) { $('statsMsg').textContent = ''; return; }
+
+    syncGroupSelect($('statsA'), d.pies.map((p) => p.name), 0);
+    syncGroupSelect($('statsB'), d.pies.map((p) => p.name), 1);
+    const a = d.pies.find((p) => p.name === $('statsA').value);
+    const b = d.pies.find((p) => p.name === $('statsB').value);
+
+    const msg = [];
+    const dropped = d.pies.reduce((x, p) => x + (p.dropped || 0), 0);
+    if (dropped) msg.push(`${dropped} replicate${dropped > 1 ? 's' : ''} with no events left out of the means and the tests.`);
+    let res = null;
+    if (a && b && a === b) msg.push('Pick two different groups to compare.');
+    else if (!a || !b || !a.reps || !b.reps || a.reps.length < 2 || b.reps.length < 2) {
+      msg.push('A test needs at least two usable replicates in each of two groups.');
+    } else {
+      const r = compareGroups(a.reps, b.reps);
+      const q = bhAdjust(r.p);
+      res = { ...r, q, star: q.map(stars), a: a.name, b: b.name };
+      msg.push(`${a.name} (n=${a.reps.length}) vs ${b.name} (n=${b.reps.length}) — overall p = ${fmtP(r.pOverall)}, ` +
+        `from ${r.nPerm.toLocaleString()} ${r.exact ? 'exact' : 'sampled'} permutations.`);
+    }
+    $('statsMsg').textContent = msg.join(' ');
+
+    const fig = buildBarSvg(d, res);
+    st.lastStats = res; st.lastBar = fig;
+    $('barPlot').innerHTML = fig ? fig.svg : '';
+    $('statsTable').innerHTML = buildStatsTable(d, res);
+  }
+
+  const repPct = (p, j) => (p.reps && p.reps.length ? p.reps : [p.frac]).map((r) => r[j] * 100);
+
+  function buildStatsTable(d, res) {
+    if (!d.pies.length) return '';
+    let h = '<table class="data"><thead><tr><th>Combination</th><th>No. positive</th>';
+    d.pies.forEach((p) => { h += `<th>${esc(p.name)}<br>mean % ± SD (n=${p.n || 1})</th>`; });
+    if (res) h += '<th>p</th><th>q (BH)</th><th></th>';
+    h += '</tr></thead><tbody>';
+    d.combos.forEach((cmb, j) => {
+      h += `<tr><td><span class="sw" style="background:${d.colors[j]}"></span>${esc(comboLabel(cmb, d.markers))}</td>`;
+      h += `<td>${cmb.filter(Boolean).length}</td>`;
+      d.pies.forEach((p) => {
+        const xs = repPct(p, j);
+        h += `<td>${mean(xs).toFixed(2)}${xs.length > 1 ? ` ± ${sd(xs).toFixed(2)}` : ''}</td>`;
+      });
+      if (res) h += `<td>${fmtP(res.p[j])}</td><td>${fmtP(res.q[j])}</td><td>${res.star[j]}</td>`;
+      h += '</tr>';
+    });
+    return h + '</tbody></table>';
+  }
+
+  function downloadStatsCsv() {
+    const d = st.lastData, res = st.lastStats;
+    if (!d) return;
+    const q = (s) => `"${String(s).replace(/"/g, '""')}"`;
+    const lines = [];
+    if (res) {
+      lines.push([q(`Overall permutation test: ${res.a} vs ${res.b}`), q(`p = ${fmtP(res.pOverall)}`),
+        q(`${res.nPerm} ${res.exact ? 'exact' : 'sampled'} permutations`)].join(','));
+      lines.push('');
+    }
+    const head = ['Combination', 'No. positive'];
+    d.pies.forEach((p) => head.push(`${p.name} mean %`, `${p.name} SD`, `${p.name} n`));
+    if (res) head.push('p', 'q (BH)');
+    lines.push(head.map(q).join(','));
+    d.combos.forEach((cmb, j) => {
+      const row = [q(comboLabel(cmb, d.markers)), cmb.filter(Boolean).length];
+      d.pies.forEach((p) => {
+        const xs = repPct(p, j);
+        row.push(mean(xs).toFixed(4), xs.length > 1 ? sd(xs).toFixed(4) : '', xs.length);
+      });
+      if (res) row.push(res.p[j].toFixed(6), res.q[j].toFixed(6));
+      lines.push(row.join(','));
+    });
+    saveBlob(new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv' }), `${baseName()}_statistics.csv`);
   }
 
   function updateDownloadLabel() {
@@ -1090,6 +1400,15 @@
   fmtChanged();
   $('download').addEventListener('click', download);
   $('downloadCsv').addEventListener('click', downloadCsv);
+  $('statsOn').addEventListener('change', render);
+  $('statsA').addEventListener('change', render);
+  $('statsB').addEventListener('change', render);
+  $('dlStats').addEventListener('click', downloadStatsCsv);
+  $('dlBar').addEventListener('click', () => withBusy(async () => {
+    if (!st.lastBar) return;
+    const fmt = $('fmt').value;
+    saveBlob(await figToBlob(st.lastBar, fmt), `${baseName()}_bars${EXT[fmt]}`);
+  }));
 
   const demo = new URLSearchParams(location.search).get('demo');
   if (demo) loadDemo(demo);

@@ -119,6 +119,9 @@ table.markers td { padding: 2px 4px; }
 table.markers td:first-child, table.markers td:last-child { width: 40px; }
 
 .preview { padding: 20px; min-width: 0; }
+.statsPanel { margin-top: 18px; }
+.statsPanel .canvasWrap { min-height: 0; }
+.statsPanel table.data { margin-top: 4px; }
 .canvasWrap {
   background: #ffffff; border: 1px solid var(--line); border-radius: 8px; padding: 12px;
   overflow: auto; min-height: 300px; display: flex; align-items: flex-start; justify-content: center;

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PolyPie — polyfunctionality pie charts</title>
 <meta name="description" content="Upload an Excel or CSV file to create polyfunctionality pie charts, adjust the plot and export SVG / PDF / PNG / JPEG. Data is processed locally in your browser.">
-<link rel="stylesheet" href="style.css?v=13">
+<link rel="stylesheet" href="style.css?v=14">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/svg2pdf.js@2.2.3/dist/svg2pdf.umd.min.js"></script>
@@ -176,8 +176,25 @@
       </div>
     </section>
 
+    <section id="secStats" hidden>
+      <h2>5. Statistics</h2>
+      <p class="hint">Needs <i>One pie per</i> set to <b>Group (mean)</b>. Error bars are SD across the replicates in each group.</p>
+      <label class="chk"><input type="checkbox" id="statsOn"> Bar chart (mean &plusmn; SD) and group comparison</label>
+      <div class="row" id="statsPair" hidden>
+        <label>Compare <select id="statsA"></select></label>
+        <label>with <select id="statsB"></select></label>
+      </div>
+      <p class="status" id="statsMsg"></p>
+      <details class="help">
+        <summary>How the tests work</summary>
+        <p><b>Overall</b> &mdash; one permutation test on the summed absolute difference between the two groups' mean compositions, answering &ldquo;do these two distributions differ?&rdquo;. This is the result to quote.</p>
+        <p><b>Per combination</b> &mdash; a two-sided rank (Mann&ndash;Whitney) test per combination, as an exact permutation so the many tied zeros are handled correctly, with Benjamini&ndash;Hochberg FDR across combinations (<code>q</code>). Treat these as <b>exploratory</b>: the slices of a pie sum to 100%, so the combinations are not independent &mdash; one going up forces others down.</p>
+        <p>Both are exact when every group assignment can be enumerated, otherwise sampled from 20,000 permutations. With few replicates the smallest reachable p is large: at n=3 vs n=3 it is 0.1, so nothing can come out significant.</p>
+      </details>
+    </section>
+
     <section id="secExport" hidden>
-      <h2>5. Export</h2>
+      <h2>6. Export</h2>
       <div class="grid2">
         <label>Format
           <select id="fmt">
@@ -208,6 +225,14 @@
 
   <main class="preview">
     <div class="canvasWrap" id="plot"><p class="empty">Load a file or click an example on the left to preview the pie charts here.</p></div>
+    <section class="statsPanel" id="statsWrap" hidden>
+      <div class="canvasWrap" id="barPlot"></div>
+      <div class="btns">
+        <button type="button" id="dlBar" class="ghost">Download bar chart</button>
+        <button type="button" id="dlStats" class="ghost">Download statistics (CSV)</button>
+      </div>
+      <div id="statsTable"></div>
+    </section>
     <details class="tableWrap" id="tableWrap" hidden>
       <summary>Processed data (%)</summary>
       <div id="table"></div>
@@ -215,6 +240,6 @@
   </main>
 </div>
 
-<script src="app.js?v=13"></script>
+<script src="app.js?v=14"></script>
 </body>
 </html>
