@@ -1,5 +1,7 @@
 # SPICE Plot Generator
 
+**Use it online: https://pitt-vignali-lab.github.io/SPICE/**
+
 A browser-based tool that turns an Excel / CSV file into SPICE-style polyfunctionality pie charts (pie slices = Boolean combinations, outer arcs = individual markers). Everything runs locally in the browser; data is never uploaded.
 
 ## Input formats
