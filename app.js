@@ -1138,6 +1138,24 @@
     return h + '</tr></tbody></table>';
   }
 
+  // the Averaged raw values table exactly as shown, Total row and sample counts included
+  function downloadRawCsv() {
+    const d = st.lastData;
+    if (!d) return;
+    const q = (x) => `"${String(x).replace(/"/g, '""')}"`;
+    const nOf = (p) => (p.inputN == null ? 1 : p.inputN);
+    const lines = [['Combination', 'No. positive',
+      ...d.pies.map((p) => `${p.name} (mean of ${nOf(p)} sample${nOf(p) > 1 ? 's' : ''})`)].map(q).join(',')];
+    d.combos.forEach((cmb, j) => {
+      lines.push([q(comboLabel(cmb, d.markers)), cmb.filter(Boolean).length,
+        ...d.pies.map((p) => numberText(p.raw[j], 4))].join(','));
+    });
+    lines.push([q('Total'), '',
+      ...d.pies.map((p) => numberText(d.combos.reduce((a, _, j) => a + p.raw[j], 0), 4))].join(','));
+    saveBlob(new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv' }),
+      `${baseName()}_raw_means.csv`);
+  }
+
   function buildStatsTable(d, res) {
     if (!d.pies.length) return '';
     let h = '<table class="data"><thead><tr><th>Combination</th><th>No. positive</th>';
@@ -1541,6 +1559,7 @@
   $('statsA').addEventListener('change', render);
   $('statsB').addEventListener('change', render);
   $('dlStats').addEventListener('click', downloadStatsCsv);
+  $('dlRaw').addEventListener('click', downloadRawCsv);
   $('dlBar').addEventListener('click', () => withBusy(async () => {
     if (!st.lastBar) return;
     const fmt = $('fmt').value;
