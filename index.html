@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PolyPie — polyfunctionality pie charts</title>
 <meta name="description" content="Upload an Excel or CSV file to create polyfunctionality pie charts, adjust the plot and export SVG / PDF / PNG / JPEG. Data is processed locally in your browser.">
-<link rel="stylesheet" href="style.css?v=15">
+<link rel="stylesheet" href="style.css?v=16">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/svg2pdf.js@2.2.3/dist/svg2pdf.umd.min.js"></script>
@@ -44,6 +44,14 @@
         <button type="button" id="tplB" class="ghost">Template B (FlowJo)</button>
       </div>
       <p class="status" id="status">No data loaded yet.</p>
+      <details class="help">
+        <summary>Import options</summary>
+        <label class="full">Marker columns (combination tables; optional)<input id="markerColumns" type="text" placeholder="e.g. IFNg, TNFa, IL2"></label>
+        <p class="hint">Leave blank for automatic detection. Set these names when both marker and sample columns contain only 0/1.</p>
+        <label id="importStatRow" class="full" hidden>FlowJo statistic<select id="importStat"><option value="">Automatic</option></select></label>
+        <label class="full">Incomplete samples<select id="missingPolicy"><option value="error">Stop and show the missing value</option><option value="exclude">Exclude incomplete samples</option></select></label>
+        <button type="button" id="applyImport">Apply import options</button>
+      </details>
       <details class="help">
         <summary>Supported file formats</summary>
         <p><b>A. Combination table:</b> one Boolean combination per row. Marker columns contain <code>+/-</code> (or 1/0, Y/N); every numeric column is one sample or group.</p>
@@ -85,8 +93,9 @@
       <table class="markers"><thead><tr><th>Use</th><th>Display name</th><th>Arc</th></tr></thead><tbody id="markerRows"></tbody></table>
       <div class="row">
         <label class="chk"><input type="checkbox" data-key="excludeNeg"> Exclude all-negative</label>
-        <label class="chk"><input type="checkbox" data-key="clipNeg" checked> Treat negative values as 0</label>
+        <label class="chk"><input type="checkbox" data-key="clipNeg" checked> Clip negative values to 0</label>
       </div>
+      <p class="hint">With clipping off, samples holding a negative value in a selected combination are left out of the composition summaries. Raw signed values always stay in the CSV.</p>
     </section>
 
     <section id="secStyle" hidden>
@@ -194,10 +203,12 @@
           </select>
         </label>
       </div>
+      <label class="chk"><input type="checkbox" id="showPoints" checked> Show individual samples</label>
+      <label class="full">Random seed<input type="number" id="statsSeed" value="20261007" min="0" max="4294967295" step="1"></label>
       <p class="status" id="statsMsg"></p>
       <details class="help">
         <summary>How the tests work</summary>
-        <p><b>Overall</b> &mdash; one permutation test on the summed absolute difference between the two groups' mean compositions, answering &ldquo;do these two distributions differ?&rdquo;. This is the result to quote.</p>
+        <p><b>Overall</b> &mdash; one permutation test on the summed absolute difference between the two groups' mean compositions, answering &ldquo;do these two groups differ in mean composition?&rdquo;. This is the result to quote. Use independent biological replicates; paired and repeated-measures tests are not implemented.</p>
         <p><b>Per combination</b> &mdash; a two-sided rank (Mann&ndash;Whitney) test per combination, as an exact permutation so the many tied zeros are handled correctly, with Benjamini&ndash;Hochberg FDR across combinations (<code>q</code>). Treat these as <b>exploratory</b>: the slices of a pie sum to 100%, so the combinations are not independent &mdash; one going up forces others down.</p>
         <p>Both are exact when every group assignment can be enumerated, otherwise sampled from 20,000 permutations. With few replicates the smallest reachable p is large: at n=3 vs n=3 it is 0.1, so nothing can come out significant.</p>
       </details>
@@ -254,6 +265,6 @@
   </main>
 </div>
 
-<script src="app.js?v=15"></script>
+<script src="app.js?v=16"></script>
 </body>
 </html>

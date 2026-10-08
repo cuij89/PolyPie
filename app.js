@@ -27,7 +27,7 @@
   };
   let opts = {};
   // v0.2: imports fail explicitly; composition always uses a documented nonnegative projection.
-  const ANALYSIS_VERSION = '0.2.0';
+  const ANALYSIS_VERSION = '0.3.0';
   const STATS_SEED = 20261007;
   const statsCache = new Map();
   const sampleN = (p) => p.n == null ? 1 : p.n;
@@ -114,7 +114,12 @@
 
   // ---------- dataset builders ----------
   function buildFlowJo(header, body) {
-    const parsed = header.map((h) => (h ? parseGateName(h) : null));
+    const selectedStat = $('importStat').value;
+    const parsed = header.map((h) => {
+      if (!h) return null;
+      const stat = String(h).split('|').slice(1).join('|').trim();
+      return selectedStat && stat !== selectedStat ? null : parseGateName(h);
+    });
     const counts = new Map();
     parsed.forEach((p) => { if (p) counts.set(keyOf(p), (counts.get(keyOf(p)) || 0) + 1); });
     let best = null, bestN = 0;
@@ -126,8 +131,6 @@
     const tokOf = (c, key) => c.toks.find((t) => t.key === key);
     const signOf = (c, key) => tokOf(c, key).pos;
     // markers that are + in every column are parent gates (e.g. CD4+), not functions
-    const measures = new Set(cols.map((c) => String(header[c.i]).split('|').slice(1).join('|').trim().toLowerCase()));
-    if (measures.size > 1) throw new Error('Mixed FlowJo statistics detected. Export one statistic with a common denominator (for example Freq. of Parent), not Count and Frequency together.');
     const kept = cols[0].toks.filter((t) => new Set(cols.map((c) => signOf(c, t.key))).size > 1);
     const markers = kept.map((t) => t.name);
     const constantMarkers = cols[0].toks.filter((t) => !kept.includes(t)).map((t) => t.name);
@@ -152,7 +155,7 @@
 
     const gateSet = new Set(cols.map((c) => c.i));
     const colName = (i) => header[i] || `Column ${i + 1}`;
-    const textCols = header.map((_, i) => i).filter((i) => !gateSet.has(i) && !parsed[i]);
+    const textCols = header.map((_, i) => i).filter((i) => !gateSet.has(i) && !parseGateName(header[i]));
     // The sample-name column identifies the row; any other text column (Group, Day, ...) is kept
     // for averaging. Prefer a sample-like header whose values are mostly unique, otherwise the
     // column with the most distinct values, so a leading "Group" column is not taken as the name.
@@ -167,10 +170,12 @@
     }
 
     const samples = [];
+    let missingSamples = 0;
     body.forEach((r, ri) => {
       const raw = nameCol >= 0 ? r[nameCol] : null;
       const name = raw != null && raw !== '' ? String(raw).trim() : `Row ${ri + 2}`;
       if (/^(mean|sd|std|stdev|median|average|avg|cv|sem)$/i.test(name)) return;
+      if ($('missingPolicy').value === 'exclude' && colIdx.some((i) => !Number.isFinite(toNum(r[i])))) { missingSamples++; return; }
       const vals = colIdx.map((i) => requiredNumber(r[i], `sample ${name}, column ${i + 1}`));
       const meta = {};
       textCols.forEach((i) => { meta[colName(i)] = r[i] == null ? '' : String(r[i]).trim(); });
@@ -181,20 +186,28 @@
     return {
       markers, combos, samples: uniqueNames(samples), ambiguous,
       groupCols: textCols.filter((i) => i !== nameCol).map(colName),
-      info: `Detected gate-name columns (FlowJo style): ${markers.length} markers (${markers.join(", ")}), ${combos.length} combinations, ${samples.length} samples. Constant gates excluded: ${constantMarkers.join(", ") || "none"}. Confirm these are parent gates; export all states for functional markers.`,
+      info: `Detected gate-name columns (FlowJo style): ${markers.length} markers (${markers.join(", ")}), ${combos.length} combinations, ${samples.length} samples. Statistic: ${selectedStat || 'unspecified'}. Incomplete samples excluded: ${missingSamples}. Constant gates excluded: ${constantMarkers.join(", ") || "none"}. Confirm these are parent gates; export all states for functional markers.`,
     };
   }
 
   function buildComboTable(header, body) {
     const ncol = Math.max(header.length, ...body.map((r) => r.length));
+    const named = $('markerColumns').value.split(',').map((x) => x.trim()).filter(Boolean);
+    named.forEach((n) => { if (!header.includes(n)) throw new Error(`Marker column not found: ${n}`); });
+    // when any column states markers as text, numeric 0/1 columns are samples, not markers
+    const hasTextStates = header.some((_, i) => {
+      const v = body.map((r) => r[i]).filter((x) => x != null && x !== '');
+      return v.length && v.every((x) => parseSign(x) !== undefined) && v.some((x) => !Number.isFinite(toNum(x)));
+    });
     const markerCols = [], valueCols = [];
     for (let i = 0; i < ncol; i++) {
       const vals = body.map((r) => r[i]).filter((v) => v != null && v !== '');
       if (!vals.length) continue;
-      if (header[i] && vals.every((v) => parseSign(v) !== undefined) && vals.some((v) => !Number.isFinite(toNum(v)))) markerCols.push(i);
+      if (named.includes(header[i]) || (!named.length && header[i] && vals.every((v) => parseSign(v) !== undefined)
+        && (!hasTextStates || vals.some((v) => !Number.isFinite(toNum(v)))))) markerCols.push(i);
       else if (vals.every((v) => isFinite(toNum(v)))) valueCols.push(i);
     }
-    if (markerCols.length < 2 || !valueCols.length) throw new Error('Combination tables need at least two marker columns written as + / - (or positive / negative), followed by numeric sample columns. Numeric 0/1 marker columns are ambiguous; convert marker states to + / -.');
+    if (markerCols.length < 2 || !valueCols.length) throw new Error('Could not identify marker and sample columns. Name the marker columns under Import options (comma separated). Marker states may be +/-, 1/0 or Y/N.');
     const recognized = new Set([...markerCols, ...valueCols]);
     header.forEach((h, i) => {
       if (!recognized.has(i) && body.some((r) => r[i] != null && r[i] !== '')) throw new Error(`Unrecognized or invalid column: ${h || i + 1}. Use marker states or numeric sample values.`);
@@ -211,7 +224,9 @@
     });
     if (combos.length < 2) return null;
 
-    const samples = valueCols.map((i) => ({
+    const usableValueCols = valueCols.filter((i) => $('missingPolicy').value !== 'exclude' || body.every((r) => Number.isFinite(toNum(r[i]))));
+    if (!usableValueCols.length) throw new Error('No complete sample columns remain.');
+    const samples = usableValueCols.map((i) => ({
       name: header[i] || `Column ${i + 1}`,
       values: rowsByCombo.map((rows) => rows.reduce((a, r) => a + requiredNumber(r[i], `sample ${header[i]}, combination ${r.slice(0, markerCols.length).join(' ')}`), 0)),
       meta: {},
@@ -219,7 +234,7 @@
     const markers = markerCols.map((i) => header[i]);
     return {
       markers, combos, samples: uniqueNames(samples), groupCols: [], ambiguous: [],
-      info: `Detected combination table: ${markers.length} markers (${markers.join(", ")}), ${combos.length} combinations, ${samples.length} sample columns.`,
+      info: `Detected combination table: ${markers.length} markers (${markers.join(", ")}), ${combos.length} combinations, ${samples.length} sample columns. ${named.length ? 'Explicit marker columns.' : 'Automatic mapping; use Import options if a numeric 0/1 sample was read as a marker.'} Incomplete samples excluded: ${valueCols.length - usableValueCols.length}.`,
     };
   }
 
@@ -233,7 +248,7 @@
     const missing = expected - ds.combos.length;
     const negatives = ds.samples.reduce((n, x) => n + x.values.filter((v) => v < 0).length, 0);
     ds.info += ` ${missing > 0 ? `${missing} combinations not supplied; percentages describe supplied combinations only.` : 'Complete combination set.'}`;
-    if (negatives) ds.info += ` ${negatives} negative values retained in raw data; compositions use max(value, 0) per sample.`;
+    if (negatives) ds.info += ` ${negatives} negative values retained in raw data; choose their handling under Markers / outer arcs.`;
     ds.info += ' Group summaries weight each usable sample equally; rows must be independent biological replicates for unpaired tests.';
     return ds;
   }
@@ -290,7 +305,9 @@
   }
 
   function loadSheet(name) {
+    if (typeof XLSX === 'undefined') { setStatus('Spreadsheet library did not load. For the offline copy, extract the whole folder, vendor included, then open index.html.', true); return; }
     const rows = XLSX.utils.sheet_to_json(st.wb.Sheets[name], { header: 1, raw: true, defval: null, blankrows: false });
+    fillStatPicker(rows);
     try {
       st.ds = buildDataset(rows);
     } catch (e) {
@@ -305,6 +322,19 @@
     showSections(true);
     showNotice(st.ds.ambiguous);
     render();
+  }
+
+  // A FlowJo export can hold several statistics; let the user say which one is the data.
+  function fillStatPicker(rows) {
+    const stats = [...new Set((rows[0] || []).filter((h) => h && parseGateName(h))
+      .map((h) => String(h).split('|').slice(1).join('|').trim()))];
+    const sel = $('importStat'), previous = sel.value;
+    sel.innerHTML = '';
+    stats.forEach((x) => sel.add(new Option(x || '(unspecified)', x)));
+    if (!stats.length) sel.add(new Option('Not applicable', ''));
+    sel.value = stats.includes(previous) ? previous
+      : (stats.find((x) => /freq.*parent/i.test(x)) || stats[0] || '');
+    $('importStatRow').hidden = stats.length < 2;
   }
 
   function showSections(on) {
@@ -480,7 +510,8 @@
       p.raw = order.map((j) => p.values[j]); // never overwrite measured/corrected input
       const input = p.repValues || [p.values];
       const processed = input.map((rv) => order.map((j) => Math.max(0, rv[j])));
-      const totals = processed.map((v) => v.reduce((a, x) => a + x, 0));
+      const excludedNegative = input.map((rv) => !opts.clipNeg && order.some((j) => rv[j] < 0));
+      const totals = processed.map((v, i) => (excludedNegative[i] ? 0 : v.reduce((a, x) => a + x, 0)));
       const reps = processed.filter((_, i) => totals[i] > 0)
         .map((v) => { const t = v.reduce((a, x) => a + x, 0); return v.map((x) => x / t); });
       p.total = totals.reduce((a, x) => a + x, 0) / totals.length;
@@ -561,10 +592,11 @@
     };
   }
   function cachedComparison(A, B) {
-    const key = JSON.stringify([ANALYSIS_VERSION, STATS_SEED, A, B]);
+    const seed = Number($('statsSeed').value) >>> 0;
+    const key = JSON.stringify([ANALYSIS_VERSION, seed, A, B]);
     if (!statsCache.has(key)) {
       if (statsCache.size >= 12) statsCache.delete(statsCache.keys().next().value);
-      statsCache.set(key, compareGroups(A, B));
+      statsCache.set(key, compareGroups(A, B, seed));
     }
     return statsCache.get(key);
   }
@@ -940,7 +972,7 @@
           fill: GROUP_COLORS[gi % GROUP_COLORS.length],
           name: `${p.name} ${label} mean ${c.m.toFixed(2)}%`,
           tip: `${p.name} \u00b7 ${label}\n${c.m.toFixed(2)}%${c.s > 0 ? ` \u00b1 ${c.s.toFixed(2)} ${errLabel()}` : ''} (n=${sampleN(p)})` });
-        c.xs.forEach((v, ri) => {
+        if (o.showPoints) c.xs.forEach((v, ri) => {
           const jitter = c.xs.length < 2 ? 0 : ((ri / (c.xs.length - 1)) - 0.5) * barW * 0.65;
           els.push({ t: 'circle', cx: bx + barW / 2 + jitter, cy: Y(v), r: 2,
             color: '#222222', width: 1, name: `${p.name} sample ${ri + 1}: ${v.toFixed(2)}%` });
@@ -1047,6 +1079,7 @@
   }
 
   function renderStats(d) {
+    opts.showPoints = $('showPoints').checked;
     const on = $('statsOn').checked && st.pieMode === 'group';
     $('statsPair').hidden = !on;
     $('statsWrap').hidden = !on;
@@ -1060,7 +1093,7 @@
 
     const msg = [];
     const dropped = d.pies.reduce((x, p) => x + (p.dropped || 0), 0);
-    if (dropped) msg.push(`${dropped} replicate${dropped > 1 ? 's' : ''} with zero nonnegative total in the selected combinations excluded from composition means and tests.`);
+    if (dropped) msg.push(`${dropped} replicate${dropped > 1 ? 's' : ''} with no usable composition (zero total, or an excluded negative value) left out of the means and the tests.`);
     let res = null;
     if (a && b && a === b) msg.push('Pick two different groups to compare.');
     else if (!a || !b || !a.reps || !b.reps || a.reps.length < 2 || b.reps.length < 2) {
@@ -1070,7 +1103,7 @@
       const q = bhAdjust(r.p);
       res = { ...r, q, star: q.map(stars), a: a.name, b: b.name };
       msg.push(`${a.name} (n=${a.reps.length}) vs ${b.name} (n=${b.reps.length}) — mean-composition L1 p = ${fmtP(r.pOverall)}, ` +
-        `from ${r.nPerm.toLocaleString()} ${r.exact ? 'exact' : 'sampled'} permutations; seed ${r.seed}. Unpaired samples; ${axisCaption()}. Negative inputs are projected to zero per sample.`);
+        `from ${r.nPerm.toLocaleString()} ${r.exact ? 'exact' : 'sampled'} permutations; seed ${r.seed}. Unpaired samples; ${axisCaption()}. Negative inputs: ${opts.clipNeg ? 'clipped per sample' : 'affected samples excluded'}.`);
     }
     $('statsMsg').textContent = msg.join(' ');
 
@@ -1129,7 +1162,7 @@
     const d = st.lastData, res = st.lastStats;
     if (!d) return;
     const q = (s) => `"${String(s).replace(/"/g, '""')}"`;
-    const lines = [[q(`PolyPie ${ANALYSIS_VERSION}; ${axisCaption()}; per-sample max(value,0), then normalization; unpaired permutation; seed ${STATS_SEED}`)].join(',')];
+    const lines = [[q(`PolyPie ${ANALYSIS_VERSION}; ${axisCaption()}; negative policy: ${opts.clipNeg ? 'clip' : 'exclude affected samples'}; per-sample normalization; unpaired permutation; seed ${res ? res.seed : Number($('statsSeed').value) >>> 0}`)].join(',')];
     if (res) {
       lines.push([q(`Overall permutation test: ${res.a} vs ${res.b}`), q(`p = ${fmtP(res.pOverall)}`),
         q(`${res.nPerm} ${res.exact ? 'exact' : 'sampled'} permutations`)].join(','));
@@ -1470,13 +1503,6 @@
     useWorkbook(which === 'b' ? aoaWorkbook(demoFlowJoAoa(), 'FlowJo') : aoaWorkbook(demoTableAoa(), 'Combinations'));
   }
 
-  // Existing pages need no new HTML. Projection is mandatory for composition only;
-  // raw signed data remain available in the data CSV.
-  document.querySelectorAll('[data-key="clipNeg"]').forEach((el) => {
-    el.checked = true; el.disabled = true;
-    el.title = 'Composition uses max(value, 0) per sample. Raw signed values are preserved in the data CSV.';
-  });
-
   // ---------- wiring ----------
   $('noticeOk').addEventListener('click', () => showNotice(null));
   window.addEventListener('resize', sizeChrome);
@@ -1506,6 +1532,11 @@
   fmtChanged();
   $('download').addEventListener('click', download);
   $('downloadCsv').addEventListener('click', downloadCsv);
+  const reloadImport = () => { if (st.wb) loadSheet($('sheet').value); };
+  ['importStat', 'missingPolicy'].forEach((id) => $(id).addEventListener('change', reloadImport));
+  $('applyImport').addEventListener('click', reloadImport);
+  $('showPoints').addEventListener('change', render);
+  $('statsSeed').addEventListener('change', render);
   $('statsOn').addEventListener('change', render);
   $('statsA').addEventListener('change', render);
   $('statsB').addEventListener('change', render);

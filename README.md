@@ -41,6 +41,14 @@ separately.
 
 Pie selection or per-group means, marker on/off (collapses combinations), marker display names and arc colors, slice coloring, sort order, radius / donut hole / arc width & spacing, start angle and direction, percent labels, title, font, legend position, background. Export as SVG, PDF (vector), PNG or JPEG (150/300/600 DPI, DPI written into the file), plus the processed data as CSV.
 
+## Offline copy
+
+`python build_offline.py --zip` writes `dist/`, with the five libraries downloaded into
+`dist/vendor/` and every reference repointed at them, plus `PolyPie_offline.zip`. The folder
+runs from a double-clicked `index.html` with no network and nothing installed. The page, script
+and stylesheet are taken from this directory and only the library URLs are rewritten, so there is
+no second copy of the source to drift. Re-run it after any change. `dist/` is not committed.
+
 ## Deploy on GitHub Pages
 
 1. Push this folder to a GitHub repository.
