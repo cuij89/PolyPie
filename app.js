@@ -26,6 +26,20 @@
     pieSig: '', lastSvg: '', lastSize: null, lastData: null, lastBar: null, lastStats: null,
   };
   let opts = {};
+  // v0.2: imports fail explicitly; composition always uses a documented nonnegative projection.
+  const ANALYSIS_VERSION = '0.2.0';
+  const STATS_SEED = 20261007;
+  const statsCache = new Map();
+  const sampleN = (p) => p.n == null ? 1 : p.n;
+  const compositionReps = (p) => p.reps !== undefined ? p.reps : (p.total > 0 ? [p.frac] : []);
+  const axisCaption = () => opts.excludeNeg ? '% of selected-marker responders' : '% of included combinations';
+  const numberText = (v, digits = 2) => Number.isFinite(v) ? v.toFixed(digits) : 'NA';
+  function requiredNumber(v, location) {
+    const n = toNum(v);
+    if (!Number.isFinite(n)) throw new Error(`Missing or invalid value at ${location}. Supply a measured value (0 only for a measured zero), or remove the incomplete sample.`);
+    return n;
+  }
+
 
   // ---------- helpers ----------
   const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -112,8 +126,11 @@
     const tokOf = (c, key) => c.toks.find((t) => t.key === key);
     const signOf = (c, key) => tokOf(c, key).pos;
     // markers that are + in every column are parent gates (e.g. CD4+), not functions
+    const measures = new Set(cols.map((c) => String(header[c.i]).split('|').slice(1).join('|').trim().toLowerCase()));
+    if (measures.size > 1) throw new Error('Mixed FlowJo statistics detected. Export one statistic with a common denominator (for example Freq. of Parent), not Count and Frequency together.');
     const kept = cols[0].toks.filter((t) => new Set(cols.map((c) => signOf(c, t.key))).size > 1);
     const markers = kept.map((t) => t.name);
+    const constantMarkers = cols[0].toks.filter((t) => !kept.includes(t)).map((t) => t.name);
     if (markers.length < 2) return null;
 
     // A run such as "GZMB+-" can only be read by assuming the first sign belongs to the gate name,
@@ -129,14 +146,13 @@
     cols.forEach((c) => {
       const signs = kept.map((t) => signOf(c, t.key));
       const k = signs.map(Number).join('');
-      if (seen.has(k)) return;
+      if (seen.has(k)) throw new Error(`Duplicate FlowJo combination at column ${c.i + 1}. Select one parent population and one statistic before importing.`);
       seen.add(k); combos.push(signs); colIdx.push(c.i);
     });
 
     const gateSet = new Set(cols.map((c) => c.i));
     const colName = (i) => header[i] || `Column ${i + 1}`;
-    const textCols = header.map((_, i) => i).filter((i) => !gateSet.has(i) &&
-      body.some((r) => r[i] != null && r[i] !== '' && !isFinite(toNum(r[i]))));
+    const textCols = header.map((_, i) => i).filter((i) => !gateSet.has(i) && !parsed[i]);
     // The sample-name column identifies the row; any other text column (Group, Day, ...) is kept
     // for averaging. Prefer a sample-like header whose values are mostly unique, otherwise the
     // column with the most distinct values, so a leading "Group" column is not taken as the name.
@@ -155,18 +171,17 @@
       const raw = nameCol >= 0 ? r[nameCol] : null;
       const name = raw != null && raw !== '' ? String(raw).trim() : `Row ${ri + 2}`;
       if (/^(mean|sd|std|stdev|median|average|avg|cv|sem)$/i.test(name)) return;
-      const vals = colIdx.map((i) => toNum(r[i]));
-      if (vals.every((v) => !isFinite(v))) return;
+      const vals = colIdx.map((i) => requiredNumber(r[i], `sample ${name}, column ${i + 1}`));
       const meta = {};
       textCols.forEach((i) => { meta[colName(i)] = r[i] == null ? '' : String(r[i]).trim(); });
-      samples.push({ name, values: vals.map((v) => (isFinite(v) ? v : 0)), meta });
+      samples.push({ name, values: vals, meta });
     });
     if (!samples.length) return null;
 
     return {
       markers, combos, samples: uniqueNames(samples), ambiguous,
       groupCols: textCols.filter((i) => i !== nameCol).map(colName),
-      info: `Detected gate-name columns (FlowJo style): ${markers.length} markers (${markers.join(", ")}), ${combos.length} combinations, ${samples.length} samples.`,
+      info: `Detected gate-name columns (FlowJo style): ${markers.length} markers (${markers.join(", ")}), ${combos.length} combinations, ${samples.length} samples. Constant gates excluded: ${constantMarkers.join(", ") || "none"}. Confirm these are parent gates; export all states for functional markers.`,
     };
   }
 
@@ -176,24 +191,29 @@
     for (let i = 0; i < ncol; i++) {
       const vals = body.map((r) => r[i]).filter((v) => v != null && v !== '');
       if (!vals.length) continue;
-      if (header[i] && vals.every((v) => parseSign(v) !== undefined)) markerCols.push(i);
+      if (header[i] && vals.every((v) => parseSign(v) !== undefined) && vals.some((v) => !Number.isFinite(toNum(v)))) markerCols.push(i);
       else if (vals.every((v) => isFinite(toNum(v)))) valueCols.push(i);
     }
-    if (markerCols.length < 2 || !valueCols.length) return null;
+    if (markerCols.length < 2 || !valueCols.length) throw new Error('Combination tables need at least two marker columns written as + / - (or positive / negative), followed by numeric sample columns. Numeric 0/1 marker columns are ambiguous; convert marker states to + / -.');
+    const recognized = new Set([...markerCols, ...valueCols]);
+    header.forEach((h, i) => {
+      if (!recognized.has(i) && body.some((r) => r[i] != null && r[i] !== '')) throw new Error(`Unrecognized or invalid column: ${h || i + 1}. Use marker states or numeric sample values.`);
+    });
 
     const combos = [], rowsByCombo = [], index = new Map();
     body.forEach((r) => {
       const signs = markerCols.map((i) => parseSign(r[i]));
-      if (signs.some((s) => s == null)) return;
+      if (signs.some((s) => s == null)) throw new Error('Missing marker state in combination table. Every row must define each marker.');
       const k = signs.map(Number).join('');
-      if (!index.has(k)) { index.set(k, combos.length); combos.push(signs); rowsByCombo.push([]); }
+      if (index.has(k)) throw new Error(`Duplicate combination ${k}. Combine intentional subdivisions before import.`);
+      index.set(k, combos.length); combos.push(signs); rowsByCombo.push([]);
       rowsByCombo[index.get(k)].push(r);
     });
     if (combos.length < 2) return null;
 
     const samples = valueCols.map((i) => ({
       name: header[i] || `Column ${i + 1}`,
-      values: rowsByCombo.map((rows) => rows.reduce((a, r) => a + (isFinite(toNum(r[i])) ? toNum(r[i]) : 0), 0)),
+      values: rowsByCombo.map((rows) => rows.reduce((a, r) => a + requiredNumber(r[i], `sample ${header[i]}, combination ${r.slice(0, markerCols.length).join(' ')}`), 0)),
       meta: {},
     }));
     const markers = markerCols.map((i) => header[i]);
@@ -209,6 +229,12 @@
     if (!header.length || !body.length) throw new Error('The sheet is empty or has no header row (the first row must contain column names).');
     const ds = buildFlowJo(header, body) || buildComboTable(header, body);
     if (!ds) throw new Error('Could not recognize the data layout. See "Supported file formats" on the left or download a template.');
+    const expected = 2 ** ds.markers.length;
+    const missing = expected - ds.combos.length;
+    const negatives = ds.samples.reduce((n, x) => n + x.values.filter((v) => v < 0).length, 0);
+    ds.info += ` ${missing > 0 ? `${missing} combinations not supplied; percentages describe supplied combinations only.` : 'Complete combination set.'}`;
+    if (negatives) ds.info += ` ${negatives} negative values retained in raw data; compositions use max(value, 0) per sample.`;
+    ds.info += ' Group summaries weight each usable sample equally; rows must be independent biological replicates for unpaired tests.';
     return ds;
   }
 
@@ -282,12 +308,13 @@
   }
 
   function showSections(on) {
-    ['secPies', 'secMarkers', 'secStyle', 'secStats', 'secExport', 'statsWrap', 'tableWrap'].forEach((id) => { $(id).hidden = !on; });
+    ['secPies', 'secMarkers', 'secStyle', 'secStats', 'secExport', 'statsWrap', 'rawWrap', 'tableWrap'].forEach((id) => { $(id).hidden = !on; });
     if (!on) $('plot').innerHTML = '<p class="empty">Load a file or click an example on the left to preview the pie charts here.</p>';
   }
 
   function initFromDataset() {
     const ds = st.ds;
+    statsCache.clear();
     st.markers = ds.markers.map((m, i) => ({ name: m, label: m, include: true, color: ARC_COLORS[i % ARC_COLORS.length] }));
     st.countOverride = {};
     st.pieOff = new Set();
@@ -450,25 +477,18 @@
     }
 
     pies.forEach((p) => {
-      const vals = order.map((j) => (opts.clipNeg ? Math.max(0, p.values[j]) : p.values[j]));
-      const total = vals.reduce((a, v) => a + Math.max(0, v), 0);
-      p.raw = vals;
-      p.frac = vals.map((v) => (total > 0 ? Math.max(0, v) / total : 0));
-      p.total = total;
-      // Each replicate's own composition, for the error bars and the tests. A replicate with no
-      // events has no composition to speak of, so it is dropped rather than read as all-negative.
-      // The group pie is then the mean of the remaining compositions, which is what the bars show.
-      if (p.repValues) {
-        const reps = [];
-        let dropped = 0;
-        p.repValues.forEach((rv) => {
-          const v = order.map((j) => Math.max(0, opts.clipNeg ? Math.max(0, rv[j]) : rv[j]));
-          const t = v.reduce((a, x) => a + x, 0);
-          if (t > 0) reps.push(v.map((x) => x / t)); else dropped++;
-        });
-        p.reps = reps; p.dropped = dropped; p.n = reps.length;
-        if (reps.length) p.frac = p.frac.map((_, j) => reps.reduce((a, r) => a + r[j], 0) / reps.length);
-      }
+      p.raw = order.map((j) => p.values[j]); // never overwrite measured/corrected input
+      const input = p.repValues || [p.values];
+      const processed = input.map((rv) => order.map((j) => Math.max(0, rv[j])));
+      const totals = processed.map((v) => v.reduce((a, x) => a + x, 0));
+      const reps = processed.filter((_, i) => totals[i] > 0)
+        .map((v) => { const t = v.reduce((a, x) => a + x, 0); return v.map((x) => x / t); });
+      p.total = totals.reduce((a, x) => a + x, 0) / totals.length;
+      p.frac = order.map((_, j) => reps.length ? reps.reduce((a, r) => a + r[j], 0) / reps.length : 0);
+      p.inputN = input.length;
+      p.dropped = input.length - reps.length;
+      p.n = reps.length;
+      if (p.repValues) p.reps = reps;
     });
 
     const markers = inc.map((i) => st.markers[i]);
@@ -493,9 +513,9 @@
   // zeros in flow data honest, where a normal approximation would not. Bigger designs sample.
   const MAX_EXACT = 200000, MC_PERMS = 20000;
 
-  const mean = (xs) => xs.reduce((a, v) => a + v, 0) / xs.length;
+  const mean = (xs) => xs.length ? xs.reduce((a, v) => a + v, 0) / xs.length : NaN;
   const sd = (xs) => {
-    if (xs.length < 2) return 0;
+    if (xs.length < 2) return NaN;
     const m = mean(xs);
     return Math.sqrt(xs.reduce((a, v) => a + (v - m) * (v - m), 0) / (xs.length - 1));
   };
@@ -531,7 +551,25 @@
   // combination plus one overall p-value for "these two distributions differ", the latter on
   // the summed absolute difference in mean composition - the pies are compositional, so the
   // per-combination values are not independent and the overall test is the sounder read.
-  function compareGroups(A, B) {
+  function seededRandom(seed) {
+    let a = seed >>> 0;
+    return () => {
+      a = (a + 0x6D2B79F5) >>> 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t ^= t + Math.imul(t ^ (t >>> 7), 61 | t);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function cachedComparison(A, B) {
+    const key = JSON.stringify([ANALYSIS_VERSION, STATS_SEED, A, B]);
+    if (!statsCache.has(key)) {
+      if (statsCache.size >= 12) statsCache.delete(statsCache.keys().next().value);
+      statsCache.set(key, compareGroups(A, B));
+    }
+    return statsCache.get(key);
+  }
+  function compareGroups(A, B, seed = STATS_SEED) {
+    const random = seededRandom(seed);
     const m = A[0].length, nA = A.length, nB = B.length, N = nA + nB;
     const pool = A.concat(B);
     const R = [], tot = [];
@@ -564,13 +602,13 @@
     else {
       const idx = pool.map((_, i) => i);
       for (let b = 0; b < MC_PERMS; b++) {
-        for (let i = N - 1; i > 0; i--) { const r = Math.floor(Math.random() * (i + 1)); [idx[i], idx[r]] = [idx[r], idx[i]]; }
+        for (let i = N - 1; i > 0; i--) { const r = Math.floor(random() * (i + 1)); [idx[i], idx[r]] = [idx[r], idx[i]]; }
         count(stat(idx.slice(0, nA)));
       }
     }
     // a sampled p-value is never reported as 0
     const adj = exact ? (h) => h / seen : (h) => (h + 1) / (seen + 1);
-    return { p: hitJ.map(adj), pOverall: adj(hitT), exact, nPerm: seen };
+    return { p: hitJ.map(adj), pOverall: adj(hitT), exact, nPerm: seen, seed };
   }
 
   // Benjamini-Hochberg false discovery rate
@@ -583,6 +621,31 @@
   }
 
   const stars = (q) => (q < 0.001 ? '***' : q < 0.01 ? '**' : q < 0.05 ? '*' : '');
+
+  // t(0.975, df) for a 95% CI; past df 30 a Cornish-Fisher expansion of the normal quantile,
+  // which is within 0.01% there and tightens as df grows
+  const T95 = [12.706, 4.303, 3.182, 2.776, 2.571, 2.447, 2.365, 2.306, 2.262, 2.228,
+    2.201, 2.179, 2.160, 2.145, 2.131, 2.120, 2.110, 2.101, 2.093, 2.086,
+    2.080, 2.074, 2.069, 2.064, 2.060, 2.056, 2.052, 2.048, 2.045, 2.042];
+  function t95(df) {
+    if (df < 1) return 0;
+    if (df <= T95.length) return T95[df - 1];
+    const z = 1.959964, z3 = z * z * z, z5 = z3 * z * z;
+    return z + (z3 + z) / (4 * df) + (5 * z5 + 16 * z3 + 3 * z) / (96 * df * df);
+  }
+
+  const ERR_LABEL = { sd: 'SD', sem: 'SEM', ci95: '95% CI', none: 'no error bars' };
+  const errLabel = () => ERR_LABEL[opts.errMode] || 'SD';
+  const sem = (xs) => (xs.length > 1 ? sd(xs) / Math.sqrt(xs.length) : NaN);
+  // half-width of the error bar actually drawn; 0 when there is nothing to draw
+  function errHalf(xs) {
+    if (xs.length < 2 || opts.errMode === 'none') return 0;
+    const s = sd(xs);
+    if (!Number.isFinite(s)) return 0;
+    if (opts.errMode === 'sd') return s;
+    const se = s / Math.sqrt(xs.length);
+    return opts.errMode === 'ci95' ? t95(xs.length - 1) * se : se;
+  }
   const fmtP = (v) => (v < 0.0001 ? '<0.0001' : v.toFixed(4));
 
   // ---------- SVG rendering ----------
@@ -631,7 +694,7 @@
       const seen = new Set();
       d.combos.forEach((s) => {
         const k = s.filter(Boolean).length;
-        if (seen.has(k)) return;
+        if (seen.has(k)) return; // one legend row per positive-count, not per combination
         seen.add(k);
         sliceItems.push({ color: countColor(k, d.nInc), label: String(k) });
       });
@@ -819,8 +882,8 @@
     if (!m || !nG) return null;
 
     const cells = pies.map((p) => d.combos.map((_, j) => {
-      const xs = (p.reps && p.reps.length ? p.reps : [p.frac]).map((r) => r[j] * 100);
-      return { m: mean(xs), s: xs.length > 1 ? sd(xs) : 0 };
+      const xs = compositionReps(p).map((r) => r[j] * 100);
+      return { m: mean(xs), s: errHalf(xs), xs };
     }));
 
     const barW = Math.max(6, Math.round(fs * 0.9)), barGap = 2;
@@ -830,16 +893,16 @@
     const plotH = Math.max(140, Math.round(o.radius * 1.6));
 
     // y scale, rounded out to a readable step
-    const hi = Math.max(0.01, ...cells.flat().map((c) => c.m + c.s));
+    const hi = Math.max(0.01, ...cells.flat().filter((c) => Number.isFinite(c.m)).map((c) => Math.max(c.m + c.s, ...c.xs)));
     const p10 = Math.pow(10, Math.floor(Math.log10(hi / 4)));
     const step = [1, 2, 2.5, 5, 10].map((x) => x * p10).find((x) => x >= hi / 4) || 10 * p10;
     const yMax = Math.ceil(hi / step) * step;
     const ticks = [];
     for (let v = 0; v <= yMax + 1e-9; v += step) ticks.push(v);
-    const tickLab = (v) => (step < 1 ? v.toFixed(1) : String(Math.round(v)));
+    const tickLab = (v) => v.toFixed(Math.max(0, Math.ceil(-Math.log10(step)) + (String(step).includes('2.5') ? 1 : 0)));
 
     const leftW = Math.max(...ticks.map((v) => textW(tickLab(v), fs)), ...d.markers.map((k) => textW(k.label, fs))) + fs * 0.7;
-    const legend = pies.map((p, gi) => ({ s: `${p.name} (n=${p.n || 1})`, c: GROUP_COLORS[gi % GROUP_COLORS.length] }));
+    const legend = pies.map((p, gi) => ({ s: `${p.name} (n=${sampleN(p)})`, c: GROUP_COLORS[gi % GROUP_COLORS.length] }));
     const legendW = legend.reduce((a, it) => a + fs * 1.2 + textW(it.s, fs) + fs, -fs);
 
     const titleH = o.title ? fs * 2 : 0;
@@ -857,7 +920,9 @@
     const els = [];
     if (o.background === 'white') els.push({ t: 'rect', x: 0, y: 0, w: W, h: H, fill: '#ffffff', name: 'Background' });
     if (o.title) els.push({ t: 'text', x: W / 2, y: pad + fs, s: o.title, size: fs * 1.25, anchor: 'middle', color: '#111111', bold: true, name: 'Title' });
-    els.push({ t: 'text', x: pad, y: yTop - fs * 0.8, s: '% of total', size: fs, anchor: 'start', color: '#444444', name: 'Y axis caption' });
+    els.push({ t: 'text', x: pad, y: yTop - fs * 0.8,
+      s: opts.errMode === 'none' ? axisCaption() : `${axisCaption()} (mean \u00b1 ${errLabel()})`,
+      size: fs, anchor: 'start', color: '#444444', name: 'Y axis caption' });
 
     ticks.forEach((v) => {
       els.push({ t: 'rect', x: x0, y: Y(v), w: plotW, h: v === 0 ? 1.2 : 1, fill: v === 0 ? '#444444' : '#e8e8e8', name: `Gridline ${tickLab(v)}` });
@@ -868,15 +933,22 @@
       const gx = x0 + j * (cellW + groupGap);
       const label = comboLabel(cmb, d.markers);
       pies.forEach((p, gi) => {
-        const c = cells[gi][j], bx = gx + gi * (barW + barGap), by = Y(Math.min(c.m, yMax));
+        const c = cells[gi][j], bx = gx + gi * (barW + barGap);
+        if (!Number.isFinite(c.m)) return;
+        const by = Y(Math.min(c.m, yMax));
         els.push({ t: 'rect', x: bx, y: by, w: barW, h: Math.max(0, yBase - by),
           fill: GROUP_COLORS[gi % GROUP_COLORS.length],
           name: `${p.name} ${label} mean ${c.m.toFixed(2)}%`,
-          tip: `${p.name} \u00b7 ${label}\n${c.m.toFixed(2)}% \u00b1 ${c.s.toFixed(2)} SD (n=${p.n || 1})` });
+          tip: `${p.name} \u00b7 ${label}\n${c.m.toFixed(2)}%${c.s > 0 ? ` \u00b1 ${c.s.toFixed(2)} ${errLabel()}` : ''} (n=${sampleN(p)})` });
+        c.xs.forEach((v, ri) => {
+          const jitter = c.xs.length < 2 ? 0 : ((ri / (c.xs.length - 1)) - 0.5) * barW * 0.65;
+          els.push({ t: 'circle', cx: bx + barW / 2 + jitter, cy: Y(v), r: 2,
+            color: '#222222', width: 1, name: `${p.name} sample ${ri + 1}: ${v.toFixed(2)}%` });
+        });
         if (c.s > 0) {
           const top = Y(Math.min(yMax, c.m + c.s)), bot = Y(Math.max(0, c.m - c.s));
           const cx = bx + barW / 2, wv = 1.4, cap = Math.max(4, barW * 0.55);
-          els.push({ t: 'rect', x: cx - wv / 2, y: top, w: wv, h: Math.max(0, bot - top), fill: '#333333', name: `${p.name} ${label} SD` });
+          els.push({ t: 'rect', x: cx - wv / 2, y: top, w: wv, h: Math.max(0, bot - top), fill: '#333333', name: `${p.name} ${label} ${errLabel()}` });
           els.push({ t: 'rect', x: cx - cap / 2, y: top, w: cap, h: wv, fill: '#333333', name: 'SD cap' });
           els.push({ t: 'rect', x: cx - cap / 2, y: bot - wv, w: cap, h: wv, fill: '#333333', name: 'SD cap' });
         }
@@ -916,7 +988,7 @@
     h += '</tr></thead><tbody>';
     d.combos.forEach((s, j) => {
       h += `<tr><td><span class="sw" style="background:${d.colors[j]}"></span>${esc(comboLabel(s, d.markers))}</td><td>${s.filter(Boolean).length}</td>`;
-      d.pies.forEach((p) => { h += `<td>${(p.frac[j] * 100).toFixed(2)}</td>`; });
+      d.pies.forEach((p) => { h += `<td>${(p.n ? (p.frac[j] * 100).toFixed(2) : 'NA')}</td>`; });
       h += '</tr>';
     });
     return h + '</tbody></table>';
@@ -959,6 +1031,7 @@
     }
     updateDownloadLabel();
     renderStats(d);
+    $('rawTable').innerHTML = buildRawTable(d);
     $('table').innerHTML = buildTable(d);
   }
 
@@ -987,17 +1060,17 @@
 
     const msg = [];
     const dropped = d.pies.reduce((x, p) => x + (p.dropped || 0), 0);
-    if (dropped) msg.push(`${dropped} replicate${dropped > 1 ? 's' : ''} with no events left out of the means and the tests.`);
+    if (dropped) msg.push(`${dropped} replicate${dropped > 1 ? 's' : ''} with zero nonnegative total in the selected combinations excluded from composition means and tests.`);
     let res = null;
     if (a && b && a === b) msg.push('Pick two different groups to compare.');
     else if (!a || !b || !a.reps || !b.reps || a.reps.length < 2 || b.reps.length < 2) {
       msg.push('A test needs at least two usable replicates in each of two groups.');
     } else {
-      const r = compareGroups(a.reps, b.reps);
+      const r = cachedComparison(a.reps, b.reps);
       const q = bhAdjust(r.p);
       res = { ...r, q, star: q.map(stars), a: a.name, b: b.name };
-      msg.push(`${a.name} (n=${a.reps.length}) vs ${b.name} (n=${b.reps.length}) — overall p = ${fmtP(r.pOverall)}, ` +
-        `from ${r.nPerm.toLocaleString()} ${r.exact ? 'exact' : 'sampled'} permutations.`);
+      msg.push(`${a.name} (n=${a.reps.length}) vs ${b.name} (n=${b.reps.length}) — mean-composition L1 p = ${fmtP(r.pOverall)}, ` +
+        `from ${r.nPerm.toLocaleString()} ${r.exact ? 'exact' : 'sampled'} permutations; seed ${r.seed}. Unpaired samples; ${axisCaption()}. Negative inputs are projected to zero per sample.`);
     }
     $('statsMsg').textContent = msg.join(' ');
 
@@ -1007,12 +1080,35 @@
     $('statsTable').innerHTML = buildStatsTable(d, res);
   }
 
-  const repPct = (p, j) => (p.reps && p.reps.length ? p.reps : [p.frac]).map((r) => r[j] * 100);
+  const repPct = (p, j) => compositionReps(p).map((r) => r[j] * 100);
+
+  // The group's averaged input values, in whatever units the file used, before any
+  // normalisation. Averaged over every sample in the group, including any whose combinations
+  // sum to zero - those have no composition but their measured values are still measurements.
+  function buildRawTable(d) {
+    if (!d.pies.length) return '';
+    const grouped = st.pieMode === 'group';
+    let h = '<table class="data"><thead><tr><th>Combination</th><th>No. positive</th>';
+    d.pies.forEach((p) => {
+      const nIn = p.inputN == null ? 1 : p.inputN;
+      h += `<th>${esc(p.name)}${grouped ? `<br>mean of ${nIn} sample${nIn > 1 ? 's' : ''}` : ''}</th>`;
+    });
+    h += '</tr></thead><tbody>';
+    d.combos.forEach((cmb, j) => {
+      h += `<tr><td><span class="sw" style="background:${d.colors[j]}"></span>${esc(comboLabel(cmb, d.markers))}</td>`;
+      h += `<td>${cmb.filter(Boolean).length}</td>`;
+      d.pies.forEach((p) => { h += `<td>${numberText(p.raw[j], 3)}</td>`; });
+      h += '</tr>';
+    });
+    h += '<tr><th>Total</th><th></th>';
+    d.pies.forEach((p) => { h += `<th>${numberText(d.combos.reduce((a, _, j) => a + p.raw[j], 0), 3)}</th>`; });
+    return h + '</tr></tbody></table>';
+  }
 
   function buildStatsTable(d, res) {
     if (!d.pies.length) return '';
     let h = '<table class="data"><thead><tr><th>Combination</th><th>No. positive</th>';
-    d.pies.forEach((p) => { h += `<th>${esc(p.name)}<br>mean % ± SD (n=${p.n || 1})</th>`; });
+    d.pies.forEach((p) => { h += `<th>${esc(p.name)}<br>mean %${opts.errMode === 'none' ? '' : ` ± ${errLabel()}`} (n=${sampleN(p)})</th>`; });
     if (res) h += '<th>p</th><th>q (BH)</th><th></th>';
     h += '</tr></thead><tbody>';
     d.combos.forEach((cmb, j) => {
@@ -1020,7 +1116,8 @@
       h += `<td>${cmb.filter(Boolean).length}</td>`;
       d.pies.forEach((p) => {
         const xs = repPct(p, j);
-        h += `<td>${mean(xs).toFixed(2)}${xs.length > 1 ? ` ± ${sd(xs).toFixed(2)}` : ''}</td>`;
+        const e = errHalf(xs);
+        h += `<td>${numberText(mean(xs))}${e > 0 ? ` ± ${e.toFixed(2)}` : ''}</td>`;
       });
       if (res) h += `<td>${fmtP(res.p[j])}</td><td>${fmtP(res.q[j])}</td><td>${res.star[j]}</td>`;
       h += '</tr>';
@@ -1032,21 +1129,23 @@
     const d = st.lastData, res = st.lastStats;
     if (!d) return;
     const q = (s) => `"${String(s).replace(/"/g, '""')}"`;
-    const lines = [];
+    const lines = [[q(`PolyPie ${ANALYSIS_VERSION}; ${axisCaption()}; per-sample max(value,0), then normalization; unpaired permutation; seed ${STATS_SEED}`)].join(',')];
     if (res) {
       lines.push([q(`Overall permutation test: ${res.a} vs ${res.b}`), q(`p = ${fmtP(res.pOverall)}`),
         q(`${res.nPerm} ${res.exact ? 'exact' : 'sampled'} permutations`)].join(','));
       lines.push('');
     }
     const head = ['Combination', 'No. positive'];
-    d.pies.forEach((p) => head.push(`${p.name} mean %`, `${p.name} SD`, `${p.name} n`));
+    d.pies.forEach((p) => head.push(`${p.name} mean %`, `${p.name} SD`, `${p.name} SEM`,
+      `${p.name} error drawn (${errLabel()})`, `${p.name} n`));
     if (res) head.push('p', 'q (BH)');
     lines.push(head.map(q).join(','));
     d.combos.forEach((cmb, j) => {
       const row = [q(comboLabel(cmb, d.markers)), cmb.filter(Boolean).length];
       d.pies.forEach((p) => {
         const xs = repPct(p, j);
-        row.push(mean(xs).toFixed(4), xs.length > 1 ? sd(xs).toFixed(4) : '', xs.length);
+        row.push(numberText(mean(xs), 4), xs.length > 1 ? sd(xs).toFixed(4) : '',
+          xs.length > 1 ? sem(xs).toFixed(4) : '', errHalf(xs).toFixed(4), xs.length);
       });
       if (res) row.push(res.p[j].toFixed(6), res.q[j].toFixed(6));
       lines.push(row.join(','));
@@ -1317,11 +1416,11 @@
     const d = st.lastData;
     if (!d) return;
     const q = (s) => `"${String(s).replace(/"/g, '""')}"`;
-    const head = ['Combination', 'No. positive', ...d.pies.map((p) => `${p.name} (value)`), ...d.pies.map((p) => `${p.name} (%)`)];
+    const head = ['Combination', 'No. positive', ...d.pies.map((p) => `${p.name} (raw mean; original units)`), ...d.pies.map((p) => `${p.name} (mean sample composition %)`)];
     const lines = [head.map(q).join(',')];
     d.combos.forEach((s, j) => {
       lines.push([q(comboLabel(s, d.markers)), s.filter(Boolean).length,
-        ...d.pies.map((p) => p.raw[j]), ...d.pies.map((p) => (p.frac[j] * 100).toFixed(4))].join(','));
+        ...d.pies.map((p) => p.raw[j]), ...d.pies.map((p) => (p.n ? (p.frac[j] * 100).toFixed(4) : 'NA'))].join(','));
     });
     saveBlob(new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv' }), ($('fname').value.trim() || 'polypie_plot') + '_data.csv');
   }
@@ -1370,6 +1469,13 @@
     st.fileBase = 'demo';
     useWorkbook(which === 'b' ? aoaWorkbook(demoFlowJoAoa(), 'FlowJo') : aoaWorkbook(demoTableAoa(), 'Combinations'));
   }
+
+  // Existing pages need no new HTML. Projection is mandatory for composition only;
+  // raw signed data remain available in the data CSV.
+  document.querySelectorAll('[data-key="clipNeg"]').forEach((el) => {
+    el.checked = true; el.disabled = true;
+    el.title = 'Composition uses max(value, 0) per sample. Raw signed values are preserved in the data CSV.';
+  });
 
   // ---------- wiring ----------
   $('noticeOk').addEventListener('click', () => showNotice(null));

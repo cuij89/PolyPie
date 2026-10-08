@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PolyPie — polyfunctionality pie charts</title>
 <meta name="description" content="Upload an Excel or CSV file to create polyfunctionality pie charts, adjust the plot and export SVG / PDF / PNG / JPEG. Data is processed locally in your browser.">
-<link rel="stylesheet" href="style.css?v=14">
+<link rel="stylesheet" href="style.css?v=15">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/svg2pdf.js@2.2.3/dist/svg2pdf.umd.min.js"></script>
@@ -178,11 +178,21 @@
 
     <section id="secStats" hidden>
       <h2>5. Statistics</h2>
-      <p class="hint">Needs <i>One pie per</i> set to <b>Group (mean)</b>. Error bars are SD across the replicates in each group.</p>
+      <p class="hint">Needs <i>One pie per</i> set to <b>Group (mean)</b>. Error bars are computed across the replicates in each group.</p>
       <label class="chk"><input type="checkbox" id="statsOn"> Bar chart (mean &plusmn; SD) and group comparison</label>
       <div class="row" id="statsPair" hidden>
         <label>Compare <select id="statsA"></select></label>
         <label>with <select id="statsB"></select></label>
+      </div>
+      <div class="row">
+        <label>Error bars
+          <select data-key="errMode">
+            <option value="sd" selected>SD</option>
+            <option value="sem">SEM</option>
+            <option value="ci95">95% CI</option>
+            <option value="none">None</option>
+          </select>
+        </label>
       </div>
       <p class="status" id="statsMsg"></p>
       <details class="help">
@@ -233,6 +243,10 @@
       </div>
       <div id="statsTable"></div>
     </section>
+    <details class="tableWrap" id="rawWrap" hidden>
+      <summary>Averaged raw values (input units, before normalization)</summary>
+      <div id="rawTable"></div>
+    </details>
     <details class="tableWrap" id="tableWrap" hidden>
       <summary>Processed data (%)</summary>
       <div id="table"></div>
@@ -240,6 +254,6 @@
   </main>
 </div>
 
-<script src="app.js?v=14"></script>
+<script src="app.js?v=15"></script>
 </body>
 </html>
